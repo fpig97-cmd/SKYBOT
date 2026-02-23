@@ -5,6 +5,10 @@ const noblox = require("noblox.js");
 const app = express();
 app.use(express.json());
 
+app.get("/", (req, res) => {
+  res.send("Rank server OK");
+});
+
 const COOKIE = process.env.ROBLOX_COOKIE;
 const GROUP_ID = Number(process.env.GROUP_ID);
 const API_KEY = process.env.API_KEY;
@@ -53,6 +57,16 @@ function checkApiKey(req, res) {
 
 app.get("/", (req, res) => {
   res.send("Rank server OK");
+});
+
+app.get("/roles", async (req, res) => {
+  try {
+    const roles = await noblox.getRoles(GROUP_ID);
+    res.json(roles);
+  } catch (e) {
+    console.error("GET /roles error:", e);
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 app.post("/rank", async (req, res) => {

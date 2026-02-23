@@ -499,6 +499,46 @@ async def set_admin_roles(interaction: discord.Interaction, 역할들: Optional[
         ephemeral=True,
     )
 
+@bot.tree.command(name="명단", description="Roblox 그룹 역할 리스트를 보여줍니다.")
+async def list_roles(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    if not RANK_API_URL_ROOT or not RANK_API_KEY:
+        await interaction.response.send_message(
+            "랭킹 서버 설정이 되어 있지 않습니다.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        resp = requests.get(
+            f"{RANK_API_URL_ROOT}/roles",
+            headers=_rank_api_headers(),
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            await interaction.followup.send(
+                f"역할 목록 불러오기 실패 (HTTP {resp.status_code}): {resp.text}",
+                ephemeral=True,
+            )
+            return
+
+        roles = resp.json()
+        lines = []
+        for r in roles:
+            name = r.get("name", "?")
+            rank = r.get("rank", "?")
+            role_id = r.get("id", "?")
+            lines.append(f"{name} (rank {rank}, id {role_id})")
+
+        msg = "\n".join(lines) or "역할이 없습니다."
+        await interaction.followup.send(msg[:1900], ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"역할 목록 중 에러 발생: {e}", ephemeral=True)
 
 @bot.tree.command(name="승진", description="Roblox 그룹 랭크를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(

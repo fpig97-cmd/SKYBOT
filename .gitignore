@@ -1,0 +1,6 @@
+bot/.env
+bot/bot.db
+bot/__pycache__/
+
+rank-server/.env
+rank-server/node_modules/

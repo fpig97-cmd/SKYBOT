@@ -51,6 +51,10 @@ function checkApiKey(req, res) {
   return true;
 }
 
+app.get("/", (req, res) => {
+  res.send("Rank server OK");
+});
+
 app.post("/rank", async (req, res) => {
   try {
     if (!checkApiKey(req, res)) return;

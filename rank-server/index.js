@@ -8,7 +8,7 @@ app.use(express.json());
 const COOKIE = process.env.ROBLOX_COOKIE;
 const GROUP_ID = Number(process.env.GROUP_ID);
 const API_KEY = process.env.API_KEY;
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 8080);
 
 if (!COOKIE) {
   throw new Error("ROBLOX_COOKIE가 .env에 없습니다.");

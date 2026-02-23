@@ -22,6 +22,7 @@ GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 RANK_API_URL_ROOT = https://surprising-perfection-production-088a.up.railway.app
+print("DEBUG ROOT:", repr(RANK_API_URL_ROOT))
 RANK_API_KEY = os.getenv("RANK_API_KEY")
 
 CREATOR_ROBLOX_NICK = "Sky_Lunarx"

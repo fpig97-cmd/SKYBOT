@@ -81,22 +81,27 @@ app.post("/rank", async (req, res) => {
     const userId = await getUserIdFromName(username);
     const rankArg = await resolveRank(String(rank));
 
-    const newRole = await noblox.setRank(GROUP_ID, userId, rankArg);
+    try {
+      const newRole = await noblox.setRank(GROUP_ID, userId, rankArg);
 
-    res.json({
-      success: true,
-      userId,
-      username,
-      rankInput: rank,
-      newRole: {
-        id: newRole.id,
-        name: newRole.name,
-        rank: newRole.rank,
-      },
-    });
+      return res.json({
+        success: true,
+        userId,
+        username,
+        rankInput: rank,
+        newRole: {
+          id: newRole.id,
+          name: newRole.name,
+          rank: newRole.rank,
+        },
+      });
+    } catch (err) {
+      console.error("setRank error:", err);
+      return res.status(400).json({ error: String(err) });
+    }
   } catch (err) {
     console.error("POST /rank error:", err);
-    res.status(500).json({ error: String(err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 

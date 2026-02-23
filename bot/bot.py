@@ -13,6 +13,8 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import requests
 
+# ---------- 기본 설정 ----------
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)
@@ -23,8 +25,6 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 RANK_API_URL_ROOT = "https://surprising-perfection-production-e015.up.railway.app"
 print("DEBUG ROOT:", repr(RANK_API_URL_ROOT))
-
-RANK_API_URL_ROOT = RANK_API_URL_ROOT="https://surprising-perfection-production-7dde.up.railway.app"
 RANK_API_KEY = os.getenv("RANK_API_KEY")
 
 CREATOR_ROBLOX_NICK = "Sky_Lunarx"
@@ -44,7 +44,8 @@ DB_PATH = os.path.join(BASE_DIR, "bot.db")
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
-# ---------- DB ----------
+# ---------- DB 스키마 ----------
+
 cursor.execute(
     """CREATE TABLE IF NOT EXISTS users(
         discord_id INTEGER,
@@ -86,7 +87,6 @@ cursor.execute(
 conn.commit()
 
 # ---------- 설정/권한 유틸 ----------
-
 
 def get_guild_group_id(guild_id: int) -> Optional[int]:
     cursor.execute("SELECT group_id FROM group_settings WHERE guild_id=?", (guild_id,))
@@ -180,11 +180,10 @@ def add_error_log(error_msg: str) -> None:
 def generate_code() -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
+# ---------- Roblox API ----------
 
 ROBLOX_USERNAME_API = "https://users.roblox.com/v1/usernames/users"
 ROBLOX_USER_API = "https://users.roblox.com/v1/users/{userId}"
-
-# ---------- Roblox API ----------
 
 
 async def roblox_get_user_id_by_username(username: str) -> Optional[int]:
@@ -219,9 +218,7 @@ async def roblox_get_description_by_user_id(user_id: int) -> Optional[str]:
             add_error_log(f"roblox_get_description: {repr(e)}")
             return None
 
-
 # ---------- 인증 View ----------
-
 
 class VerifyView(discord.ui.View):
     def __init__(self, code: str, expire_time: datetime, guild_id: int):
@@ -352,9 +349,7 @@ class VerifyView(discord.ui.View):
                     "내부 오류가 발생했습니다.", ephemeral=True
                 )
 
-
-# ---------- 공용 ----------
-
+# ---------- 공용 유틸 ----------
 
 def get_verified_users_in_guild(guild_id: int):
     cursor.execute(
@@ -367,9 +362,7 @@ def get_verified_users_in_guild(guild_id: int):
 def _rank_api_headers():
     return {"Content-Type": "application/json", "X-API-KEY": RANK_API_KEY}
 
-
-# ---------- 명령어 ----------
-
+# ---------- 슬래시 명령어 ----------
 
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
@@ -399,7 +392,14 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         """INSERT OR REPLACE INTO users(discord_id, guild_id, roblox_nick,
            roblox_user_id, code, expire_time, verified)
            VALUES(?,?,?,?,?,?,0)""",
-        (interaction.user.id, interaction.guild.id, 로블닉, user_id, code, expire_time.isoformat()),
+        (
+            interaction.user.id,
+            interaction.guild.id,
+            로블닉,
+            user_id,
+            code,
+            expire_time.isoformat(),
+        ),
     )
     conn.commit()
 
@@ -499,6 +499,7 @@ async def set_admin_roles(interaction: discord.Interaction, 역할들: Optional[
         ephemeral=True,
     )
 
+
 @bot.tree.command(name="명단", description="Roblox 그룹 역할 리스트를 보여줍니다.")
 async def list_roles(interaction: discord.Interaction):
     if not is_admin(interaction.user):
@@ -539,6 +540,7 @@ async def list_roles(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"역할 목록 중 에러 발생: {e}", ephemeral=True)
+
 
 @bot.tree.command(name="승진", description="Roblox 그룹 랭크를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(
@@ -615,14 +617,12 @@ async def demote_to_role_cmd(
         print("DEBUG ROOT:", repr(RANK_API_URL_ROOT))
         print("DEBUG URL:", f"{RANK_API_URL_ROOT}/rank")
         resp = requests.post(
-        f"{RANK_API_URL_ROOT}/rank",
+            f"{RANK_API_URL_ROOT}/rank",
             json=payload,
             headers=_rank_api_headers(),
             timeout=30,
         )
         print("DEBUG STATUS:", resp.status_code, resp.text[:200])
-
-        
 
         if resp.status_code == 200:
             data = resp.json()
@@ -746,7 +746,7 @@ async def bulk_demote_verified(interaction: discord.Interaction):
                     oldRole = r.get("oldRole", {})
                     newRole = r.get("newRole", {})
                     lines.append(
-                        f" {r['username']}: "
+                        f"{r['username']}: "
                         f"{oldRole.get('name','?')}({oldRole.get('rank','?')}) → "
                         f"{newRole.get('name','?')}({newRole.get('rank','?')})"
                     )
@@ -762,6 +762,7 @@ async def bulk_demote_verified(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 
+# ---------- 봇 시작 ----------
 
 @bot.event
 async def on_ready():
@@ -770,6 +771,5 @@ async def on_ready():
     except Exception as e:
         print("동기화 실패:", e)
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-
 
 bot.run(TOKEN)

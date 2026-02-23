@@ -21,8 +21,10 @@ TOKEN = str(os.getenv("DISCORD_TOKEN"))
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-RANK_API_URL_ROOT = https://surprising-perfection-production-e015.up.railway.app
+RANK_API_URL_ROOT = "https://surprising-perfection-production-e015.up.railway.app"
 print("DEBUG ROOT:", repr(RANK_API_URL_ROOT))
+
+RANK_API_URL_ROOT = RANK_API_URL_ROOT="https://surprising-perfection-production-7dde.up.railway.app"
 RANK_API_KEY = os.getenv("RANK_API_KEY")
 
 CREATOR_ROBLOX_NICK = "Sky_Lunarx"
@@ -570,12 +572,17 @@ async def demote_to_role_cmd(
 
     try:
         payload = {"username": username, "rank": role_name}
+        print("DEBUG ROOT:", repr(RANK_API_URL_ROOT))
+        print("DEBUG URL:", f"{RANK_API_URL_ROOT}/rank")
         resp = requests.post(
-            f"{RANK_API_URL_ROOT}/rank",
+        f"{RANK_API_URL_ROOT}/rank",
             json=payload,
             headers=_rank_api_headers(),
-            timeout=15,
+            timeout=30,
         )
+        print("DEBUG STATUS:", resp.status_code, resp.text[:200])
+
+        
 
         if resp.status_code == 200:
             data = resp.json()

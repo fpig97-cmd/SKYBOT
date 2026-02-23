@@ -161,7 +161,7 @@ app.post("/bulk-demote", async (req, res) => {
 });
 
 init().then(() => {
-  app.listen(PORT, () => {
-    console.log("Rank server listening on port", 3000);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log("Rank server listening on port", PORT);
   });
 });

@@ -1269,5 +1269,5 @@ async def on_ready():
     if not rank_log_task.is_running():
         rank_log_task.start()
         
-bot.run(TOKEN)
-
+if __name__ == "__main__":
+    bot.run(TOKEN)

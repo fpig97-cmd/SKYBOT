@@ -1264,6 +1264,7 @@ async def on_ready():
         await bot.tree.sync()
         print("Synced global commands")
     # rank 로그 루프 시작
+if not rank_log_task.is_running():
     rank_log_task.start()
 
 # 봇 실행

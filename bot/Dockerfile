@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY .env .
 COPY bot.py .
 
-CMD ["python", "bot.py"]
+CMD ["python3", "bot.py"]

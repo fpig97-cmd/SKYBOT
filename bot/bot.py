@@ -1250,24 +1250,16 @@ async def rank_log_task():
     except Exception as e:
         print(f"rank_log_task error: {e}")
 
-# ---------- 봇 시작 ----------
-@bot.event
+# ---------- 봇 실행 -----------
+        @bot.event
 async def on_ready():
+    print(f"{bot.user} 로그인 완료")
+    guild = discord.Object(id=GUILD_ID)  # 길드 단위 동기화
     try:
-        if GUILD_ID != 0:
-            guild = discord.Object(id=GUILD_ID)
-            synced = await bot.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} commands to guild.")
-        else:
-            synced = await bot.tree.sync()
-            print(f"Synced {len(synced)} commands globally.")
+        synced = await bot.tree.sync(guild=guild)
+        print(f"길드 단위 명령어 {len(synced)}개 동기화 완료")
     except Exception as e:
-        print("동기화 실패:", e)
-
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-
-    if not rank_log_task.is_running():
-        rank_log_task.start()
+        print(f"명령어 동기화 실패: {e}")
         
 if __name__ == "__main__":
     bot.run(TOKEN)

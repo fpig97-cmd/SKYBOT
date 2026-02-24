@@ -47,6 +47,18 @@ cursor = conn.cursor()
 # ---------- DB 스키마 ----------
 
 cursor.execute(
+    """CREATE TABLE IF NOT EXISTS forced_verified(
+        discord_id INTEGER,
+        guild_id INTEGER,
+        roblox_nick TEXT,
+        roblox_user_id INTEGER,
+        rank_role TEXT,
+        PRIMARY KEY(discord_id, guild_id)
+    )"""
+)
+conn.commit()
+
+cursor.execute(
     """CREATE TABLE IF NOT EXISTS users(
         discord_id INTEGER,
         guild_id INTEGER,
@@ -527,20 +539,50 @@ async def list_roles(interaction: discord.Interaction):
             )
             return
 
-        roles = resp.json()
-        lines = []
-        for r in roles:
-            name = r.get("name", "?")
-            rank = r.get("rank", "?")
-            role_id = r.get("id", "?")
-            lines.append(f"{name} (rank {rank}, id {role_id})")
+        roles = resp.json()  # [{ name, rank, id }, ...]
+        total = len(roles)
 
-        msg = "\n".join(lines) or "역할이 없습니다."
-        await interaction.followup.send(msg[:1900], ephemeral=True)
+        if not roles:
+            await interaction.followup.send("역할이 없습니다.", ephemeral=True)
+            return
+
+        # 한 embed당 최대 10개 정도씩
+        PER_EMBED = 10
+        embeds: list[discord.Embed] = []
+
+        for i in range(0, total, PER_EMBED):
+            chunk = roles[i:i + PER_EMBED]
+
+            embed = discord.Embed(
+                title="Roblox 그룹 역할 리스트",
+                description=f"{i + 1} ~ {min(i + PER_EMBED, total)} / {total}개",
+                colour=discord.Colour.blurple(),
+            )
+            # 전체 개수는 footer에
+            embed.set_footer(text=f"총 역할 개수: {total}개")
+
+            for r in chunk:
+                name = r.get("name", "?")
+                rank = r.get("rank", "?")
+                role_id = r.get("id", "?")
+
+                # name/field 형식은 취향대로
+                embed.add_field(
+                    name=name,
+                    value=f"rank: `{rank}` / id: `{role_id}`",
+                    inline=False,
+                )
+
+            embeds.append(embed)
+
+        # 여러 embed 한 번에 전송
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
 
     except Exception as e:
-        await interaction.followup.send(f"역할 목록 중 에러 발생: {e}", ephemeral=True)
-
+        await interaction.followup.send(
+            f"역할 목록 중 에러 발생: {e}",
+            ephemeral=True,
+        )
 
 @bot.tree.command(name="승진", description="Roblox 그룹 랭크를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(
@@ -641,11 +683,9 @@ async def demote_to_role_cmd(
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(
-    name="일괄승진",
-    description="이 서버에서 인증된 모든 유저를 한 단계 승진합니다. (관리자)",
-)
-async def bulk_promote_verified(interaction: discord.Interaction):
+@bot.tree.command(name="일괄승진", description="인증된 모든 유저를 특정 역할로 승진합니다. (관리자)")
+@app_commands.describe(role_name="변경할 그룹 역할 이름 또는 숫자")
+async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
@@ -658,20 +698,29 @@ async def bulk_promote_verified(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    users_data = get_verified_users_in_guild(interaction.guild.id)
-    if not users_data:
+    # 인증된 유저 + 강제인증 유저 모두 포함
+    cursor.execute(
+        "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
+        (interaction.guild.id,),
+    )
+    verified_users = [row[0] for row in cursor.fetchall() if row[0]]
+
+    cursor.execute(
+        "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
+        (interaction.guild.id,),
+    )
+    forced_users = [row[0] for row in cursor.fetchall() if row[0]]
+
+    all_users = list(set(verified_users + forced_users))
+
+    if not all_users:
         await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
         return
 
-    username_list = [row[1] for row in users_data if row[1]]
-    if not username_list:
-        await interaction.followup.send("인증된 유저들의 로블록스 닉네임 정보가 없습니다.", ephemeral=True)
-        return
-
     try:
-        payload = {"usernames": username_list}
+        payload = {"usernames": all_users, "rank": role_name}
         resp = requests.post(
-            f"{RANK_API_URL_ROOT}/bulk-promote",
+            f"{RANK_API_URL_ROOT}/bulk-promote-to-role",
             json=payload,
             headers=_rank_api_headers(),
             timeout=120,
@@ -679,20 +728,22 @@ async def bulk_promote_verified(interaction: discord.Interaction):
 
         if resp.status_code == 200:
             data = resp.json()
+            embed = discord.Embed(title="✅ 일괄 승진 완료", color=discord.Color.green())
+            
             lines = []
             for r in data.get("results", []):
                 if r.get("success"):
                     oldRole = r.get("oldRole", {})
                     newRole = r.get("newRole", {})
                     lines.append(
-                        f"{r['username']}: "
-                        f"{oldRole.get('name','?')}({oldRole.get('rank','?')}) → "
-                        f"{newRole.get('name','?')}({newRole.get('rank','?')})"
+                        f"{r['username']}: {oldRole.get('name','?')}({oldRole.get('rank','?')}) → {newRole.get('name','?')}({newRole.get('rank','?')})"
                     )
                 else:
                     lines.append(f"{r['username']}: {r.get('error','오류')}")
+            
             msg = "\n".join(lines) or "결과가 없습니다."
-            await interaction.followup.send(msg[:1900], ephemeral=True)
+            embed.description = msg[:2000]
+            await interaction.followup.send(embed=embed, ephemeral=True)
         else:
             await interaction.followup.send(
                 f"일괄 승진 실패 (HTTP {resp.status_code}): {resp.text}",
@@ -702,11 +753,9 @@ async def bulk_promote_verified(interaction: discord.Interaction):
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(
-    name="일괄강등",
-    description="이 서버에서 인증된 모든 유저를 한 단계 강등합니다. (관리자)",
-)
-async def bulk_demote_verified(interaction: discord.Interaction):
+@bot.tree.command(name="일괄강등", description="인증된 모든 유저를 특정 역할로 변경합니다. (관리자)")
+@app_commands.describe(role_name="변경할 그룹 역할 이름 또는 숫자")
+async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
@@ -719,20 +768,29 @@ async def bulk_demote_verified(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    users_data = get_verified_users_in_guild(interaction.guild.id)
-    if not users_data:
+    # 인증된 유저 + 강제인증 유저 모두 포함
+    cursor.execute(
+        "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
+        (interaction.guild.id,),
+    )
+    verified_users = [row[0] for row in cursor.fetchall() if row[0]]
+
+    cursor.execute(
+        "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
+        (interaction.guild.id,),
+    )
+    forced_users = [row[0] for row in cursor.fetchall() if row[0]]
+
+    all_users = list(set(verified_users + forced_users))
+
+    if not all_users:
         await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
         return
 
-    username_list = [row[1] for row in users_data if row[1]]
-    if not username_list:
-        await interaction.followup.send("인증된 유저들의 로블록스 닉네임 정보가 없습니다.", ephemeral=True)
-        return
-
     try:
-        payload = {"usernames": username_list}
+        payload = {"usernames": all_users, "rank": role_name}
         resp = requests.post(
-            f"{RANK_API_URL_ROOT}/bulk-demote",
+            f"{RANK_API_URL_ROOT}/bulk-demote-to-role",
             json=payload,
             headers=_rank_api_headers(),
             timeout=120,
@@ -740,25 +798,129 @@ async def bulk_demote_verified(interaction: discord.Interaction):
 
         if resp.status_code == 200:
             data = resp.json()
+            embed = discord.Embed(title="✅ 일괄 강등 완료", color=discord.Color.red())
+            
             lines = []
             for r in data.get("results", []):
                 if r.get("success"):
                     oldRole = r.get("oldRole", {})
                     newRole = r.get("newRole", {})
                     lines.append(
-                        f"{r['username']}: "
-                        f"{oldRole.get('name','?')}({oldRole.get('rank','?')}) → "
-                        f"{newRole.get('name','?')}({newRole.get('rank','?')})"
+                        f"{r['username']}: {oldRole.get('name','?')}({oldRole.get('rank','?')}) → {newRole.get('name','?')}({newRole.get('rank','?')})"
                     )
                 else:
                     lines.append(f"{r['username']}: {r.get('error','오류')}")
+            
             msg = "\n".join(lines) or "결과가 없습니다."
-            await interaction.followup.send(msg[:1900], ephemeral=True)
+            embed.description = msg[:2000]
+            await interaction.followup.send(embed=embed, ephemeral=True)
         else:
             await interaction.followup.send(
                 f"일괄 강등 실패 (HTTP {resp.status_code}): {resp.text}",
                 ephemeral=True,
             )
+    except Exception as e:
+        await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="강제인증", description="유저를 강제로 특정 role로 인증합니다. (관리자)")
+@app_commands.describe(
+    user="Discord 유저 멘션",
+    roblox_nick="Roblox 본닉",
+    rank="그룹 역할 이름 또는 숫자"
+)
+async def force_verify(interaction: discord.Interaction, user: discord.User, roblox_nick: str, rank: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Roblox 유저 ID 가져오기
+    user_id = await roblox_get_user_id_by_username(roblox_nick)
+    if not user_id:
+        await interaction.followup.send(
+            f"해당 닉네임의 로블록스 계정을 찾을 수 없습니다.",
+            ephemeral=True,
+        )
+        return
+
+    # 강제인증 DB에 저장
+    cursor.execute(
+        """INSERT OR REPLACE INTO forced_verified(discord_id, guild_id, roblox_nick, roblox_user_id, rank_role)
+           VALUES(?, ?, ?, ?, ?)""",
+        (user.id, interaction.guild.id, roblox_nick, user_id, rank),
+    )
+    conn.commit()
+
+    embed = discord.Embed(
+        title="✅ 강제인증 완료",
+        color=discord.Color.green(),
+        description=f"{user.mention} 을(를) {roblox_nick} ({rank}로 강제인증했습니다."
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="강제인증해제", description="강제인증된 유저를 제거합니다. (관리자)")
+@app_commands.describe(user="Discord 유저 멘션")
+async def force_unverify(interaction: discord.Interaction, user: discord.User):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    cursor.execute(
+        "DELETE FROM forced_verified WHERE discord_id=? AND guild_id=?",
+        (user.id, interaction.guild.id),
+    )
+    conn.commit()
+
+    embed = discord.Embed(
+        title="✅ 강제인증 해제 완료",
+        color=discord.Color.orange(),
+        description=f"{user.mention} 의 강제인증을 해제했습니다."
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="일괄닉네임변경", description="특정 role의 로블닉으로 Discord 닉네임을 일괄 변경합니다. (관리자)")
+@app_commands.describe(role_name="Roblox 그룹 역할 이름")
+async def bulk_nickname_change(interaction: discord.Interaction, role_name: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # 해당 role의 모든 유저 가져오기 (일단 간단히, 실제로는 Roblox API로 role 확인 필요)
+        cursor.execute(
+            "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+            (interaction.guild.id,),
+        )
+        users_data = cursor.fetchall()
+
+        updated = 0
+        failed = 0
+
+        for discord_id, roblox_nick in users_data:
+            try:
+                member = interaction.guild.get_member(discord_id)
+                if member:
+                    await member.edit(nick=roblox_nick)
+                    updated += 1
+            except Exception as e:
+                failed += 1
+
+        embed = discord.Embed(
+            title="✅ 일괄 닉네임 변경 완료",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="성공", value=str(updated), inline=True)
+        embed.add_field(name="실패", value=str(failed), inline=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     except Exception as e:
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 

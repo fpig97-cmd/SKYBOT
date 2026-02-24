@@ -527,21 +527,51 @@ async def list_roles(interaction: discord.Interaction):
             )
             return
 
-        roles = resp.json()
-        lines = []
-        for r in roles:
-            name = r.get("name", "?")
-            rank = r.get("rank", "?")
-            role_id = r.get("id", "?")
-            lines.append(f"{name} (rank {rank}, id {role_id})")
+        roles = resp.json()  # [{ name, rank, id }, ...]
+        total = len(roles)
 
-        msg = "\n".join(lines) or "역할이 없습니다."
-        await interaction.followup.send(msg[:1900], ephemeral=True)
+        if not roles:
+            await interaction.followup.send("역할이 없습니다.", ephemeral=True)
+            return
+
+        # 한 embed당 최대 10개 정도씩
+        PER_EMBED = 10
+        embeds: list[discord.Embed] = []
+
+        for i in range(0, total, PER_EMBED):
+            chunk = roles[i:i + PER_EMBED]
+
+            embed = discord.Embed(
+                title="Roblox 그룹 역할 리스트",
+                description=f"{i + 1} ~ {min(i + PER_EMBED, total)} / {total}개",
+                colour=discord.Colour.blurple(),
+            )
+            # 전체 개수는 footer에
+            embed.set_footer(text=f"총 역할 개수: {total}개")
+
+            for r in chunk:
+                name = r.get("name", "?")
+                rank = r.get("rank", "?")
+                role_id = r.get("id", "?")
+
+                # name/field 형식은 취향대로
+                embed.add_field(
+                    name=name,
+                    value=f"rank: `{rank}` / id: `{role_id}`",
+                    inline=False,
+                )
+
+            embeds.append(embed)
+
+        # 여러 embed 한 번에 전송
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
 
     except Exception as e:
-        await interaction.followup.send(f"역할 목록 중 에러 발생: {e}", ephemeral=True)
-
-
+        await interaction.followup.send(
+            f"역할 목록 중 에러 발생: {e}",
+            ephemeral=True,
+        )
+        
 @bot.tree.command(name="승진", description="Roblox 그룹 랭크를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(
     username="Roblox 본닉",

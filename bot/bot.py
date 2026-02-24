@@ -9,6 +9,7 @@ from typing import Optional
 import aiohttp
 import discord
 from discord import app_commands
+from discord.ext import tasks
 from discord.ext import commands
 from dotenv import load_dotenv
 import requests
@@ -46,10 +47,29 @@ cursor = conn.cursor()
 
 # ---------- DB 스키마 ----------
 cursor.execute(
+    """CREATE TABLE IF NOT EXISTS rank_log_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER,
+        log_data TEXT,
+        created_at TEXT
+    )"""
+)
+conn.commit()
+
+cursor.execute(
     """CREATE TABLE IF NOT EXISTS blacklist(
         guild_id INTEGER,
         group_id INTEGER,
         PRIMARY KEY(guild_id, group_id)
+    )"""
+)
+conn.commit()
+
+cursor.execute(
+    """CREATE TABLE IF NOT EXISTS rank_log_settings(
+        guild_id INTEGER PRIMARY KEY,
+        channel_id INTEGER,
+        enabled INTEGER DEFAULT 0
     )"""
 )
 conn.commit()
@@ -1019,6 +1039,217 @@ async def view_blacklist(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="명단로그채널지정", description="명단 로그를 기록할 채널을 지정합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="로그 채널")
+async def set_rank_log_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    cursor.execute(
+        """INSERT OR REPLACE INTO rank_log_settings(guild_id, channel_id, enabled)
+           VALUES(?, ?, COALESCE((SELECT enabled FROM rank_log_settings WHERE guild_id=?), 0))""",
+        (interaction.guild.id, channel.id, interaction.guild.id),
+    )
+    conn.commit()
+
+    await interaction.response.send_message(
+        f"명단 로그 채널을 {channel.mention}로 설정했습니다.",
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="명단로그", description="명단 로그 기능을 켜거나 끕니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(status="on 또는 off")
+async def toggle_rank_log(interaction: discord.Interaction, status: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    if status.lower() not in ["on", "off"]:
+        await interaction.response.send_message(
+            "상태는 'on' 또는 'off' 만 가능합니다.", ephemeral=True
+        )
+        return
+
+    enabled = 1 if status.lower() == "on" else 0
+
+    cursor.execute(
+        """INSERT OR REPLACE INTO rank_log_settings(guild_id, channel_id, enabled)
+           VALUES(?, COALESCE((SELECT channel_id FROM rank_log_settings WHERE guild_id=?), 0), ?)""",
+        (interaction.guild.id, interaction.guild.id, enabled),
+    )
+    conn.commit()
+
+    status_text = "켜짐" if enabled else "꺼짐"
+    await interaction.response.send_message(
+        f"명단 로그 기능을 {status_text}으로 설정했습니다.",
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="그룹명단복구", description="저장된 명단 로그로부터 랭크를 복구합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(번호="복구할 로그의 일련번호")
+async def restore_rank_log(interaction: discord.Interaction, 번호: int):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # 해당 로그 찾기
+        cursor.execute(
+            "SELECT log_data FROM rank_log_history WHERE id=? AND guild_id=?",
+            (번호, interaction.guild.id),
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            await interaction.followup.send(
+                f"일련번호가 {번호}인 로그를 찾을 수 없습니다.", ephemeral=True
+            )
+            return
+
+        import json
+        log_data = json.loads(row[0])
+
+        if not log_data:
+            await interaction.followup.send(
+                f"로그에 복구할 데이터가 없습니다.", ephemeral=True
+            )
+            return
+
+        # 모든 유저의 랭크를 저장된 상태로 복구
+        results = []
+        for item in log_data:
+            try:
+                username = item["username"]
+                rank = item["rank"]  # 숫자 또는 문자열 rank
+
+                resp = requests.post(
+                    f"{RANK_API_URL_ROOT}/rank",
+                    json={"username": username, "rank": rank},
+                    headers=_rank_api_headers(),
+                    timeout=15,
+                )
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    newRole = data.get("newRole", {})
+                    results.append(
+                        f"{username}: {newRole.get('name', '?')} (rank {newRole.get('rank', '?')})"
+                    )
+                else:
+                    results.append(f"{username}: HTTP {resp.status_code}")
+
+            except Exception as e:
+                results.append(f"{username}: {str(e)}")
+
+        msg = "\n".join(results)
+        embed = discord.Embed(
+            title="명단 복구 완료",
+            description=msg[:2000],
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_footer(text=f"일련번호: {번호}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ 복구 중 에러 발생: {e}", ephemeral=True)
+
+@tasks.loop(minutes=5)
+async def rank_log_task():
+    """5분마다 그룹 가입자들의 랭크를 로그"""
+    try:
+        cursor.execute("SELECT guild_id, channel_id FROM rank_log_settings WHERE enabled=1")
+        settings = cursor.fetchall()
+
+        for guild_id, channel_id in settings:
+            guild = bot.get_guild(guild_id)
+            if not guild:
+                continue
+
+            channel = guild.get_channel(channel_id)
+            if not channel:
+                continue
+
+            try:
+                cursor.execute(
+                    "SELECT roblox_nick, roblox_user_id FROM users WHERE guild_id=? AND verified=1",
+                    (guild_id,),
+                )
+                users = cursor.fetchall()
+
+                if not users:
+                    continue
+
+                usernames = [u[0] for u in users]
+                
+                try:
+                    resp = requests.post(
+                        f"{RANK_API_URL_ROOT}/bulk-promote",
+                        json={"usernames": usernames},
+                        headers=_rank_api_headers(),
+                        timeout=30,
+                    )
+
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        lines = []
+                        log_data = []  # 복구용 데이터
+                        
+                        for r in data.get("results", []):
+                            if r.get("success"):
+                                newRole = r.get("newRole", {})
+                                lines.append(
+                                    f"{r['username']}: {newRole.get('name', '?')} (rank {newRole.get('rank', '?')})"
+                                )
+                                # 복구용 데이터 저장
+                                log_data.append({
+                                    "username": r['username'],
+                                    "rank": newRole.get('rank', '?'),
+                                    "rank_name": newRole.get('name', '?')
+                                })
+                            else:
+                                lines.append(f"{r['username']}: 오류 - {r.get('error', '불명')}")
+
+                        if lines:
+                            # DB에 로그 저장
+                            import json
+                            cursor.execute(
+                                "INSERT INTO rank_log_history(guild_id, log_data, created_at) VALUES(?, ?, ?)",
+                                (guild_id, json.dumps(log_data), datetime.now().isoformat()),
+                            )
+                            conn.commit()
+                            
+                            # 일련번호 가져오기
+                            cursor.execute(
+                                "SELECT id FROM rank_log_history WHERE guild_id=? ORDER BY id DESC LIMIT 1",
+                                (guild_id,),
+                            )
+                            log_id = cursor.fetchone()[0]
+                            
+                            msg = "\n".join(lines)
+                            embed = discord.Embed(
+                                title="명단 로그",
+                                description=msg[:2000],
+                                color=discord.Color.blue(),
+                                timestamp=datetime.now(timezone.utc),
+                            )
+                            embed.set_footer(text=f"일련번호: {log_id}")
+                            await channel.send(embed=embed)
+                except Exception as e:
+                    print(f"rank_log_task API error: {e}")
+
+            except Exception as e:
+                print(f"rank_log_task error for guild {guild_id}: {e}")
+
+    except Exception as e:
+        print(f"rank_log_task error: {e}")
+
 # ---------- 봇 시작 ----------
 
 @bot.event
@@ -1028,5 +1259,7 @@ async def on_ready():
     except Exception as e:
         print("동기화 실패:", e)
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+
+rank_log_task.start()
 
 bot.run(TOKEN)

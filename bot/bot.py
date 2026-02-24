@@ -683,75 +683,48 @@ async def demote_to_role_cmd(
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="일괄승진", description="인증된 모든 유저를 특정 역할로 승진합니다. (관리자)")
-@app_commands.describe(role_name="변경할 그룹 역할 이름 또는 숫자")
-async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str):
+# 강제인증 함수 수정 (rank 파라미터 제거)
+@bot.tree.command(name="강제인증", description="유저를 강제로 인증합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    user="Discord 유저 멘션",
+    roblox_nick="Roblox 본닉"
+)
+async def force_verify(interaction: discord.Interaction, user: discord.User, roblox_nick: str):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
 
-    if not RANK_API_URL_ROOT or not RANK_API_KEY:
-        await interaction.response.send_message(
-            "랭킹 서버 설정이 되어 있지 않습니다.", ephemeral=True
-        )
-        return
-
     await interaction.response.defer(ephemeral=True)
 
-    # 인증된 유저 + 강제인증 유저 모두 포함
-    cursor.execute(
-        "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
-        (interaction.guild.id,),
-    )
-    verified_users = [row[0] for row in cursor.fetchall() if row[0]]
-
-    cursor.execute(
-        "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
-        (interaction.guild.id,),
-    )
-    forced_users = [row[0] for row in cursor.fetchall() if row[0]]
-
-    all_users = list(set(verified_users + forced_users))
-
-    if not all_users:
-        await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
+    user_id = await roblox_get_user_id_by_username(roblox_nick)
+    if not user_id:
+        await interaction.followup.send(
+            f"해당 닉네임의 로블록스 계정을 찾을 수 없습니다.",
+            ephemeral=True,
+        )
         return
 
-    try:
-        payload = {"usernames": all_users, "rank": role_name}
-        resp = requests.post(
-            f"{RANK_API_URL_ROOT}/bulk-promote-to-role",
-            json=payload,
-            headers=_rank_api_headers(),
-            timeout=120,
-        )
+    # users 테이블에 verified=1로 저장
+    cursor.execute(
+        """INSERT OR REPLACE INTO users(discord_id, guild_id, roblox_nick, roblox_user_id, code, expire_time, verified)
+           VALUES(?, ?, ?, ?, ?, ?, 1)""",
+        (user.id, interaction.guild.id, roblox_nick, user_id, "forced", datetime.now().isoformat()),
+    )
+    # forced_verified에도 표시
+    cursor.execute(
+        """INSERT OR REPLACE INTO forced_verified(discord_id, guild_id, roblox_nick, roblox_user_id, rank_role)
+           VALUES(?, ?, ?, ?, ?)""",
+        (user.id, interaction.guild.id, roblox_nick, user_id, None),
+    )
+    conn.commit()
 
-        if resp.status_code == 200:
-            data = resp.json()
-            embed = discord.Embed(title="일괄 승진 완료", color=discord.Color.green())
-            
-            lines = []
-            for r in data.get("results", []):
-                if r.get("success"):
-                    oldRole = r.get("oldRole", {})
-                    newRole = r.get("newRole", {})
-                    lines.append(
-                        f"{r['username']}: {oldRole.get('name','?')}({oldRole.get('rank','?')}) → {newRole.get('name','?')}({newRole.get('rank','?')})"
-                    )
-                else:
-                    lines.append(f"{r['username']}: {r.get('error','오류')}")
-            
-            msg = "\n".join(lines) or "결과가 없습니다."
-            embed.description = msg[:2000]
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        else:
-            await interaction.followup.send(
-                f"일괄 승진 실패 (HTTP {resp.status_code}): {resp.text}",
-                ephemeral=True,
-            )
-    except Exception as e:
-        await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
-
+    embed = discord.Embed(
+        title="✅ 강제인증 완료",
+        color=discord.Color.green(),
+        description=f"{user.mention} 을(를) {roblox_nick}로 인증했습니다."
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="일괄강등", description="인증된 모든 유저를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(role_name="변경할 그룹 역할 이름 또는 숫자")
@@ -768,7 +741,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
 
     await interaction.response.defer(ephemeral=True)
 
-    # 인증된 유저 + 강제인증 유저 모두 포함
+    # 인증된 유저 중 강제인증 해제된 유저 제외
     cursor.execute(
         "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
         (interaction.guild.id,),
@@ -779,9 +752,10 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
         "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
         (interaction.guild.id,),
     )
-    forced_users = [row[0] for row in cursor.fetchall() if row[0]]
+    forced_users = set([row[0] for row in cursor.fetchall() if row[0]])
 
-    all_users = list(set(verified_users + forced_users))
+    # 강제인증 된 유저는 제외
+    all_users = [u for u in verified_users if u not in forced_users]
 
     if not all_users:
         await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
@@ -798,8 +772,8 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
 
         if resp.status_code == 200:
             data = resp.json()
-            embed = discord.Embed(title="일괄 강등 완료", color=discord.Color.red())
-            
+            embed = discord.Embed(title="✅ 일괄 강등 완료", color=discord.Color.red())
+
             lines = []
             for r in data.get("results", []):
                 if r.get("success"):
@@ -810,7 +784,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
                     )
                 else:
                     lines.append(f"{r['username']}: {r.get('error','오류')}")
-            
+
             msg = "\n".join(lines) or "결과가 없습니다."
             embed.description = msg[:2000]
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -823,12 +797,13 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="강제인증", description="유저를 강제로 인증합니다. (관리자)")
+@bot.tree.command(name="강제인증", description="유저를 강제로 특정 role로 인증합니다. (관리자)")
 @app_commands.describe(
     user="Discord 유저 멘션",
-    roblox_nick="Roblox 본닉"
+    roblox_nick="Roblox 본닉",
+    rank="그룹 역할 이름 또는 숫자"
 )
-async def force_verify(interaction: discord.Interaction, user: discord.User, roblox_nick: str):
+async def force_verify(interaction: discord.Interaction, user: discord.User, roblox_nick: str, rank: str):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
@@ -844,24 +819,18 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
         )
         return
 
-    # users 테이블에 verified=1로 저장 (바로 인증 처리)
-    cursor.execute(
-        """INSERT OR REPLACE INTO users(discord_id, guild_id, roblox_nick, roblox_user_id, code, expire_time, verified)
-           VALUES(?, ?, ?, ?, ?, ?, 1)""",
-        (user.id, interaction.guild.id, roblox_nick, user_id, "forced", datetime.now().isoformat(), ),
-    )
-    # forced_verified에도 표시 (해제 시 구분용)
+    # 강제인증 DB에 저장
     cursor.execute(
         """INSERT OR REPLACE INTO forced_verified(discord_id, guild_id, roblox_nick, roblox_user_id, rank_role)
            VALUES(?, ?, ?, ?, ?)""",
-        (user.id, interaction.guild.id, roblox_nick, user_id, None),
+        (user.id, interaction.guild.id, roblox_nick, user_id, rank),
     )
     conn.commit()
 
     embed = discord.Embed(
-        title="강제인증 완료",
+        title="✅ 강제인증 완료",
         color=discord.Color.green(),
-        description=f"{user.mention} 을(를) {roblox_nick}로 인증했습니다."
+        description=f"{user.mention} 을(를) {roblox_nick} ({rank})로 강제인증했습니다."
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -875,12 +844,6 @@ async def force_unverify(interaction: discord.Interaction, user: discord.User):
 
     await interaction.response.defer(ephemeral=True)
 
-    # users 테이블에서 삭제 (인증 해제)
-    cursor.execute(
-        "DELETE FROM users WHERE discord_id=? AND guild_id=?",
-        (user.id, interaction.guild.id),
-    )
-    # forced_verified에서도 삭제
     cursor.execute(
         "DELETE FROM forced_verified WHERE discord_id=? AND guild_id=?",
         (user.id, interaction.guild.id),
@@ -888,11 +851,12 @@ async def force_unverify(interaction: discord.Interaction, user: discord.User):
     conn.commit()
 
     embed = discord.Embed(
-        title="강제인증 해제 완료",
+        title="✅ 강제인증 해제 완료",
         color=discord.Color.orange(),
-        description=f"{user.mention} 의 인증을 해제했습니다."
+        description=f"{user.mention} 의 강제인증을 해제했습니다."
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
+
 
 @bot.tree.command(name="일괄닉네임변경", description="특정 role의 로블닉으로 Discord 닉네임을 일괄 변경합니다. (관리자)")
 @app_commands.describe(role_name="Roblox 그룹 역할 이름")

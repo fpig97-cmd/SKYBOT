@@ -1190,7 +1190,7 @@ async def rank_log_task():
                 
                 try:
                     resp = requests.post(
-                        f"{RANK_API_URL_ROOT}/bulk-promote",
+                        f"{RANK_API_URL_ROOT}/bulk-status",
                         json={"usernames": usernames},
                         headers=_rank_api_headers(),
                         timeout=30,
@@ -1198,49 +1198,77 @@ async def rank_log_task():
 
                     if resp.status_code == 200:
                         data = resp.json()
-                        lines = []
-                        log_data = []  # 복구용 데이터
                         
+                        # 현재 상태 저장
+                        current_state = {}
                         for r in data.get("results", []):
                             if r.get("success"):
-                                newRole = r.get("newRole", {})
-                                lines.append(
-                                    f"{r['username']}: {newRole.get('name', '?')} (rank {newRole.get('rank', '?')})"
-                                )
-                                # 복구용 데이터 저장
-                                log_data.append({
-                                    "username": r['username'],
-                                    "rank": newRole.get('rank', '?'),
-                                    "rank_name": newRole.get('name', '?')
-                                })
-                            else:
-                                lines.append(f"{r['username']}: 오류 - {r.get('error', '불명')}")
+                                role_info = r.get("role", {})
+                                current_state[r['username']] = {
+                                    "rank": role_info.get('rank', 0),
+                                    "rank_name": role_info.get('name', '?')
+                                }
 
-                        if lines:
-                            # DB에 로그 저장
+                        # 이전 로그 가져오기
+                        cursor.execute(
+                            "SELECT log_data FROM rank_log_history WHERE guild_id=? ORDER BY id DESC LIMIT 1",
+                            (guild_id,),
+                        )
+                        prev_row = cursor.fetchone()
+
+                        changes = []
+                        if prev_row:
                             import json
+                            prev_data = json.loads(prev_row[0])
+                            prev_state = {item["username"]: item for item in prev_data}
+
+                            # 변경 사항만 찾기
+                            for username, current in current_state.items():
+                                if username in prev_state:
+                                    prev = prev_state[username]
+                                    if prev["rank"] != current["rank"]:
+                                        changes.append(
+                                            f"{username}: {prev['rank_name']}(rank {prev['rank']}) → {current['rank_name']}(rank {current['rank']})"
+                                        )
+                                else:
+                                    # 새로 추가된 유저
+                                    changes.append(
+                                        f"🆕 {username}: {current['rank_name']}(rank {current['rank']})"
+                                    )
+                        else:
+                            # 첫 로그면 모든 유저 표시
+                            for username, current in current_state.items():
+                                changes.append(
+                                    f"{username}: {current['rank_name']}(rank {current['rank']})"
+                                )
+
+                        # 변경사항이 있을 때만 로그 저장 및 전송
+                        if changes:
+                            import json
+                            log_data = [{"username": k, **v} for k, v in current_state.items()]
+                            
                             cursor.execute(
                                 "INSERT INTO rank_log_history(guild_id, log_data, created_at) VALUES(?, ?, ?)",
                                 (guild_id, json.dumps(log_data), datetime.now().isoformat()),
                             )
                             conn.commit()
                             
-                            # 일련번호 가져오기
                             cursor.execute(
                                 "SELECT id FROM rank_log_history WHERE guild_id=? ORDER BY id DESC LIMIT 1",
                                 (guild_id,),
                             )
                             log_id = cursor.fetchone()[0]
                             
-                            msg = "\n".join(lines)
+                            msg = "\n".join(changes)
                             embed = discord.Embed(
-                                title="명단 로그",
+                                title="📊 명단 변경 로그",
                                 description=msg[:2000],
                                 color=discord.Color.blue(),
                                 timestamp=datetime.now(timezone.utc),
                             )
-                            embed.set_footer(text=f"일련번호: {log_id}")
+                            embed.set_footer(text=f"일련번호: {log_id} | 변경: {len(changes)}건")
                             await channel.send(embed=embed)
+
                 except Exception as e:
                     print(f"rank_log_task API error: {e}")
 
@@ -1250,14 +1278,27 @@ async def rank_log_task():
     except Exception as e:
         print(f"rank_log_task error: {e}")
 
-# ---------- 봇 실행 -----------
+
+@rank_log_task.before_loop
+async def before_rank_log_task():
+    """태스크 시작 전 봇이 준비될 때까지 대기"""
+    await bot.wait_until_ready()
+    
+# ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
-
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands globally.")
+    except Exception as e:
+        print("동기화 실패:", e)
+    
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    # 태스크가 이미 실행 중이 아니면 시작
     if not rank_log_task.is_running():
         rank_log_task.start()
 
-# 봇 실행
-if __name__ == "__main__":
-    bot.run(TOKEN)
+
+bot.run(TOKEN)
+

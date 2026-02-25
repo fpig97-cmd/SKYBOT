@@ -105,6 +105,49 @@ app.post("/rank", async (req, res) => {
   }
 });
 
+app.post("/bulk-status", async (req, res) => {
+  try {
+    if (!checkApiKey(req, res)) return;
+
+    const { usernames } = req.body;
+    if (!Array.isArray(usernames) || usernames.length === 0) {
+      return res.status(400).json({ error: "usernames 배열이 필요합니다." });
+    }
+
+    const results = [];
+    for (const name of usernames) {
+      try {
+        const userId = await getUserIdFromName(name);
+        const role = await noblox.getRankInGroup(GROUP_ID, userId);
+        const roles = await noblox.getRoles(GROUP_ID);
+        const roleInfo = roles.find(r => r.rank === role) || {};
+        
+        results.push({
+          username: name,
+          success: true,
+          role: {
+            id: roleInfo.id || 0,
+            name: roleInfo.name || "?",
+            rank: role,
+          },
+        });
+      } catch (e) {
+        console.error("bulk-status error for", name, e);
+        results.push({
+          username: name,
+          success: false,
+          error: String(e),
+        });
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (err) {
+    console.error("POST /bulk-status error:", err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 app.post("/bulk-promote", async (req, res) => {
   try {
     if (!checkApiKey(req, res)) return;

@@ -205,9 +205,15 @@ def set_guild_admin_role_ids(guild_id: int, role_ids: list[int]) -> None:
 
 
 def is_admin(member: discord.Member) -> bool:
+    # 🔥 제작자는 어떤 서버든 무조건 통과
+    if OWNER_ID > 0 and member.id == OWNER_ID:
+        return True
+
+    # 디스코드 서버 관리자 권한
     if member.guild_permissions.administrator:
         return True
 
+    # 설정된 관리자 역할
     admin_ids = get_guild_admin_role_ids(member.guild.id)
     for rid in admin_ids:
         role = member.guild.get_role(int(rid))

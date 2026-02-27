@@ -840,6 +840,56 @@ async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str)
     
     await interaction.followup.send(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="인증해제", description="유저의 인증을 해제합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(user="인증 해제할 Discord 유저")
+async def unverify_user(interaction: discord.Interaction, user: discord.User):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    cursor.execute(
+        "SELECT verified FROM users WHERE discord_id=? AND guild_id=?",
+        (user.id, interaction.guild.id),
+    )
+    data = cursor.fetchone()
+    
+    if not data or data[0] == 0:
+        await interaction.followup.send(f"{user.mention}은(는) 인증된 기록이 없습니다.", ephemeral=True)
+        return
+
+    # users 테이블에서 삭제
+    cursor.execute(
+        "DELETE FROM users WHERE discord_id=? AND guild_id=?",
+        (user.id, interaction.guild.id),
+    )
+    
+    # forced_verified에서도 삭제
+    cursor.execute(
+        "DELETE FROM forced_verified WHERE discord_id=? AND guild_id=?",
+        (user.id, interaction.guild.id),
+    )
+    conn.commit()
+
+    # 인증 역할 제거
+    role_id = get_guild_role_id(interaction.guild.id)
+    if role_id:
+        role = interaction.guild.get_role(role_id)
+        member = interaction.guild.get_member(user.id)
+        if member and role and role in member.roles:
+            try:
+                await member.remove_roles(role)
+            except:
+                pass
+
+    embed = discord.Embed(
+        title="인증 해제 완료",
+        color=discord.Color.orange(),
+        description=f"{user.mention}의 인증을 해제했습니다."
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="일괄강등", description="인증된 모든 유저를 특정 역할로 변경합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))

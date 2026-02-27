@@ -584,59 +584,80 @@ async def configure(interaction: discord.Interaction, 역할: discord.Role):
     )
 
 
-@bot.tree.command(name="관리자지정", description="관리자 역할 설정 (개발자)")
-@app_commands.describe(역할들="관리자 역할들을 멘션으로 여러 개 입력 (비워두면 전부 해제)")
-async def set_admin_roles(interaction: discord.Interaction, 역할들: Optional[str] = None):
+@bot.tree.command(name="관리자지정", description="관리자 역할 추가/제거 (개발자 전용)")
+@app_commands.describe(
+    역할="추가할 관리자 역할",
+    모드="add = 추가 / remove = 제거 / reset = 전체초기화"
+)
+@app_commands.choices(
+    모드=[
+        app_commands.Choice(name="add", value="add"),
+        app_commands.Choice(name="remove", value="remove"),
+        app_commands.Choice(name="reset", value="reset"),
+    ]
+)
+async def set_admin_roles(
+    interaction: discord.Interaction,
+    역할: Optional[discord.Role],
+    모드: app_commands.Choice[str],
+):
     if not is_owner(interaction.user.id):
-        await interaction.response.send_message("개발자만 사용할 수 있습니다.", ephemeral=True)
+        await interaction.response.send_message(
+            "개발자만 사용할 수 있습니다.", ephemeral=True
+        )
         return
 
     guild = interaction.guild
     if guild is None:
-        await interaction.response.send_message("길드에서만 사용할 수 있습니다.", ephemeral=True)
-        return
-
-    if 역할들 is None:
-        set_guild_admin_role_ids(guild.id, [])
         await interaction.response.send_message(
-            "관리자 역할 설정을 해제했습니다.", ephemeral=True
+            "길드에서만 사용할 수 있습니다.", ephemeral=True
         )
         return
 
-    ids = re.findall(r"\d+", 역할들)
-    if not ids:
+    current_roles = set(get_guild_admin_role_ids(guild.id))
+
+    # reset
+    if 모드.value == "reset":
+        set_guild_admin_role_ids(guild.id, [])
         await interaction.response.send_message(
-            "역할을 멘션해서 입력하거나, 인자를 비워서 전체 해제해주세요.",
-            ephemeral=True,
+            "관리자 역할을 전부 초기화했습니다.", ephemeral=True
+        )
+        return
+
+    if 역할 is None:
+        await interaction.response.send_message(
+            "역할을 선택해주세요.", ephemeral=True
         )
         return
 
     bot_member = guild.me
-    role_ids: list[int] = []
-    mentions: list[str] = []
+    if bot_member.top_role <= 역할:
+        await interaction.response.send_message(
+            "봇보다 높은 역할은 설정할 수 없습니다.", ephemeral=True
+        )
+        return
 
-    for _id in ids:
-        role = guild.get_role(int(_id))
-        if not role:
-            continue
-        if bot_member.top_role <= role:
+    if 모드.value == "add":
+        current_roles.add(역할.id)
+        set_guild_admin_role_ids(guild.id, list(current_roles))
+        await interaction.response.send_message(
+            f"{역할.mention} 을(를) 관리자 역할로 추가했습니다.",
+            ephemeral=True
+        )
+
+    elif 모드.value == "remove":
+        if 역할.id in current_roles:
+            current_roles.remove(역할.id)
+            set_guild_admin_role_ids(guild.id, list(current_roles))
             await interaction.response.send_message(
-                f"{role.mention} 은(는) 봇의 최상위 역할보다 위 역할이라 설정할 수 없습니다.",
-                ephemeral=True,
+                f"{역할.mention} 을(를) 관리자 역할에서 제거했습니다.",
+                ephemeral=True
             )
-            return
-
-        if role.id not in role_ids:
-            role_ids.append(role.id)
-            mentions.append(role.mention)
-
-    set_guild_admin_role_ids(guild.id, role_ids)
-
-    await interaction.response.send_message(
-        "관리자 역할을 다음 역할들로 설정했습니다:\n" + ", ".join(mentions),
-        ephemeral=True,
+        else:
+            await interaction.response.send_message(
+                "해당 역할은 관리자 목록에 없습니다.",
+                ephemeral=True
     )
-
 
 @bot.tree.command(name="명단", description="Roblox 그룹 역할 리스트를 보여줍니다.")
 async def list_roles(interaction: discord.Interaction):

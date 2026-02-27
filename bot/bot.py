@@ -470,7 +470,7 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
 
     if blocked_groups:
         await interaction.followup.send(
-            f"❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n차단된 그룹: {', '.join(map(str, blocked_groups))}",
+            f"블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n차단된 그룹: {', '.join(map(str, blocked_groups))}",
             ephemeral=True
         )
         return
@@ -935,7 +935,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
     # 대량 처리 경고
     if total > 1000:
         await interaction.followup.send(
-            f"⚠️ {total}명 처리 예정 (약 {total // 60}분 소요)\n처리 시작합니다...",
+            f"{total}명 처리 예정 (약 {total // 60}분 소요)\n처리 시작합니다...",
             ephemeral=True
         )
 
@@ -974,7 +974,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
             continue
 
     # 최종 결과
-    embed = discord.Embed(title="✅ 일괄 강등 완료", color=discord.Color.red())
+    embed = discord.Embed(title="일괄 강등 완료", color=discord.Color.red())
     embed.add_field(name="총 처리", value=f"{total}명", inline=True)
     embed.add_field(name="성공", value=f"{len([r for r in all_results if r.get('success')])}명", inline=True)
     embed.add_field(name="실패", value=f"{len([r for r in all_results if not r.get('success')])}명", inline=True)
@@ -1304,6 +1304,7 @@ async def rank_log_task():
 async def before_rank_log_task():
     await bot.wait_until_ready()
 
+    
     
 # ---------- 봇 시작 ----------
 

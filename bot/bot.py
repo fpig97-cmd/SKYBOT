@@ -402,17 +402,23 @@ class VerifyView(discord.ui.View):
 # ---------- 공용 유틸 ----------
 async def roblox_get_user_groups(user_id: int) -> list[int]:
     """사용자가 속한 그룹 ID 목록 반환"""
-    url = f"https://groups.roblox.com/v1/users/{user_id}/groups"
+    url = f"https://groups.roblox.com/v2/users/{user_id}/groups/roles"  # v2 API 사용
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
+                    print(f"DEBUG: Roblox API error for user {user_id}: status {resp.status}")
                     return []
                 data = await resp.json()
+                print(f"DEBUG: Roblox API response for {user_id}: {data}")  # 디버그
+                
                 groups = data.get("data", [])
-                return [g.get("group", {}).get("id") for g in groups if g.get("group")]
+                group_ids = [g.get("group", {}).get("id") for g in groups if g.get("group")]
+                print(f"DEBUG: Extracted group_ids: {group_ids}")  # 디버그
+                return group_ids
         except Exception as e:
             add_error_log(f"roblox_get_user_groups: {repr(e)}")
+            print(f"DEBUG: Exception in roblox_get_user_groups: {e}")  # 디버그
             return []
         
 def get_verified_users_in_guild(guild_id: int):
@@ -461,7 +467,7 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
      user_groups = await roblox_get_user_groups(user_id)
 
     blocked_groups = [g for g in user_groups if g in blacklist_groups]
-        
+
     if blocked_groups:
         await interaction.followup.send(
             f"❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n차단된 그룹: {', '.join(map(str, blocked_groups))}",

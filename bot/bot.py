@@ -449,26 +449,32 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         )
         return
 
-    # ✅ 블랙리스트 체크 (비동기)
+   # ✅ 블랙리스트 체크 (디버깅 추가)
     cursor.execute(
-        "SELECT group_id FROM blacklist WHERE guild_id=?",
-        (interaction.guild.id,),
+      "SELECT group_id FROM blacklist WHERE guild_id=?",
+       (interaction.guild.id,),
     )
     blacklist_groups = set([row[0] for row in cursor.fetchall()])
-    
+
+    print(f"DEBUG: blacklist_groups = {blacklist_groups}")  # 디버그
+
     if blacklist_groups:
         # 비동기로 사용자 그룹 확인
         user_groups = await roblox_get_user_groups(user_id)
-        
+
+        print(f"DEBUG: user_groups for {로블닉} (ID {user_id}) = {user_groups}")  # 디버그
+    
         # 블랙리스트 그룹에 속하는지 체크
         blocked_groups = [g for g in user_groups if g in blacklist_groups]
+
+        print(f"DEBUG: blocked_groups = {blocked_groups}")  # 디버그
         
-        if blocked_groups:
-            await interaction.followup.send(
-                f"❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n차단된 그룹: {', '.join(map(str, blocked_groups))}",
-                ephemeral=True
-            )
-            return
+    if blocked_groups:
+        await interaction.followup.send(
+            f"❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n차단된 그룹: {', '.join(map(str, blocked_groups))}",
+            ephemeral=True
+        )
+        return
 
     code = generate_code()
     expire_time = datetime.now() + timedelta(minutes=5)

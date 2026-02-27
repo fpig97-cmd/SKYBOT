@@ -771,6 +771,7 @@ async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str)
 
     await interaction.response.defer(ephemeral=True)
 
+
     cursor.execute(
         "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
         (interaction.guild.id,),
@@ -855,7 +856,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
         return
 
     await interaction.response.defer(ephemeral=True)
-
+    
     cursor.execute(
         "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
         (interaction.guild.id,),
@@ -924,7 +925,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
     embed.add_field(name="실패", value=f"{len([r for r in all_results if not r.get('success')])}명", inline=True)
     
     await interaction.followup.send(embed=embed, ephemeral=True)
-    
+
 @bot.tree.command(name="강제인증", description="유저를 강제로 특정 role로 인증합니다. (관리자)")
 @app_commands.describe(
     user="Discord 유저 멘션",
@@ -1254,16 +1255,23 @@ async def before_rank_log_task():
 @bot.event
 async def on_ready():
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands globally.")
+        # GUILD_ID 서버는 먼저 동기화 (즉시 적용)
+        if GUILD_ID > 0:
+            guild = discord.Object(id=GUILD_ID)
+            synced_guild = await bot.tree.sync(guild=guild)
+            print(f"Synced {len(synced_guild)} commands to guild {GUILD_ID} (즉시 적용)")
+        
+        # 전역 동기화 (다른 서버들, 15분 소요)
+        synced_global = await bot.tree.sync()
+        print(f"Synced {len(synced_global)} commands globally (15분 후 적용)")
+        
     except Exception as e:
         print("동기화 실패:", e)
     
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     
-    # 태스크가 이미 실행 중이 아니면 시작
+    # 태스크 시작
     if not rank_log_task.is_running():
         rank_log_task.start()
-
 
 bot.run(TOKEN)

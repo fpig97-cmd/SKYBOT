@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import sqlite3
 import random
 import string
@@ -123,6 +124,14 @@ cursor.execute(
         group_id INTEGER
     )"""
 )
+
+cursor.execute(
+    """CREATE TABLE IF NOT EXISTS rollback_settings(
+        guild_id INTEGER PRIMARY KEY,
+        auto_rollback INTEGER DEFAULT 1
+    )"""
+)
+conn.commit()
 
 conn.commit()
 
@@ -1160,7 +1169,7 @@ async def restore_rank_log(interaction: discord.Interaction, 번호: int):
     except Exception as e:
         await interaction.followup.send(f"❌ 복구 중 에러 발생: {e}", ephemeral=True)
 
-@tasks.loop(minutes=5)
+@tasks.loop(seconds=5)
 async def rank_log_task():
     """5분마다 그룹 가입자들의 랭크를 로그"""
     try:
@@ -1178,7 +1187,7 @@ async def rank_log_task():
 
             try:
                 cursor.execute(
-                    "SELECT roblox_nick, roblox_user_id FROM users WHERE guild_id=? AND verified=1",
+                    "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
                     (guild_id,),
                 )
                 users = cursor.fetchall()
@@ -1199,7 +1208,7 @@ async def rank_log_task():
                     if resp.status_code == 200:
                         data = resp.json()
                         
-                        # 현재 상태 저장
+                        # 현재 상태
                         current_state = {}
                         for r in data.get("results", []):
                             if r.get("success"):
@@ -1211,15 +1220,15 @@ async def rank_log_task():
 
                         # 이전 로그 가져오기
                         cursor.execute(
-                            "SELECT log_data FROM rank_log_history WHERE guild_id=? ORDER BY id DESC LIMIT 1",
+                            "SELECT id, log_data FROM rank_log_history WHERE guild_id=? ORDER BY id DESC LIMIT 1",
                             (guild_id,),
                         )
                         prev_row = cursor.fetchone()
 
                         changes = []
                         if prev_row:
-                            import json
-                            prev_data = json.loads(prev_row[0])
+                            prev_id, prev_log = prev_row
+                            prev_data = json.loads(prev_log)
                             prev_state = {item["username"]: item for item in prev_data}
 
                             # 변경 사항만 찾기
@@ -1227,26 +1236,65 @@ async def rank_log_task():
                                 if username in prev_state:
                                     prev = prev_state[username]
                                     if prev["rank"] != current["rank"]:
-                                        changes.append(
-                                            f"{username}: {prev['rank_name']}(rank {prev['rank']}) → {current['rank_name']}(rank {current['rank']})"
-                                        )
-                                else:
-                                    # 새로 추가된 유저
-                                    changes.append(
-                                        f"🆕 {username}: {current['rank_name']}(rank {current['rank']})"
-                                    )
-                        else:
-                            # 첫 로그면 모든 유저 표시
-                            for username, current in current_state.items():
-                                changes.append(
-                                    f"{username}: {current['rank_name']}(rank {current['rank']})"
-                                )
+                                        changes.append({
+                                            "username": username,
+                                            "old_rank": prev["rank"],
+                                            "old_rank_name": prev["rank_name"],
+                                            "new_rank": current["rank"],
+                                            "new_rank_name": current["rank_name"]
+                                        })
 
-                        # 변경사항이 있을 때만 로그 저장 및 전송
+                        # 변경사항이 있을 때만 처리
                         if changes:
-                            import json
+                            # 5초 안에 10명 이상 변경 시 자동 롤백 체크
+                            cursor.execute(
+                                "SELECT auto_rollback FROM rollback_settings WHERE guild_id=?",
+                                (guild_id,),
+                            )
+                            rollback_row = cursor.fetchone()
+                            auto_rollback = rollback_row[0] if rollback_row else 1
+
+                            if len(changes) >= 10 and auto_rollback == 1:
+                                # 자동 롤백 실행
+                                try:
+                                    rollback_results = []
+                                    for change in changes:
+                                        resp_rollback = requests.post(
+                                            f"{RANK_API_URL_ROOT}/rank",
+                                            json={
+                                                "username": change["username"],
+                                                "rank": change["old_rank"]
+                                            },
+                                            headers=_rank_api_headers(),
+                                            timeout=15,
+                                        )
+                                        if resp_rollback.status_code == 200:
+                                            rollback_results.append(f"✅ {change['username']}")
+                                        else:
+                                            rollback_results.append(f"❌ {change['username']}")
+
+                                    # 롤백 알림
+                                    embed = discord.Embed(
+                                        title="🚨 자동 롤백 실행",
+                                        description=f"5분 내 {len(changes)}명 변경 감지 → 자동 롤백",
+                                        color=discord.Color.red(),
+                                        timestamp=datetime.now(timezone.utc),
+                                    )
+                                    embed.add_field(
+                                        name="롤백 결과",
+                                        value="\n".join(rollback_results[:20]),
+                                        inline=False
+                                    )
+                                    await channel.send(embed=embed)
+                                    
+                                    # 롤백했으니 로그는 저장 안 함
+                                    continue
+
+                                except Exception as e:
+                                    print(f"Auto rollback error: {e}")
+
+                            # 로그 저장
                             log_data = [{"username": k, **v} for k, v in current_state.items()]
-                            
                             cursor.execute(
                                 "INSERT INTO rank_log_history(guild_id, log_data, created_at) VALUES(?, ?, ?)",
                                 (guild_id, json.dumps(log_data), datetime.now().isoformat()),
@@ -1259,11 +1307,18 @@ async def rank_log_task():
                             )
                             log_id = cursor.fetchone()[0]
                             
-                            msg = "\n".join(changes)
+                            # 변경사항 출력
+                            change_lines = []
+                            for c in changes:
+                                change_lines.append(
+                                    f"{c['username']}: {c['old_rank_name']}(rank {c['old_rank']}) → {c['new_rank_name']}(rank {c['new_rank']})"
+                                )
+                            
+                            msg = "\n".join(change_lines)
                             embed = discord.Embed(
                                 title="📊 명단 변경 로그",
                                 description=msg[:2000],
-                                color=discord.Color.blue(),
+                                color=discord.Color.orange(),
                                 timestamp=datetime.now(timezone.utc),
                             )
                             embed.set_footer(text=f"일련번호: {log_id} | 변경: {len(changes)}건")
@@ -1281,8 +1336,8 @@ async def rank_log_task():
 
 @rank_log_task.before_loop
 async def before_rank_log_task():
-    """태스크 시작 전 봇이 준비될 때까지 대기"""
     await bot.wait_until_ready()
+
     
 # ---------- 봇 시작 ----------
 @bot.event

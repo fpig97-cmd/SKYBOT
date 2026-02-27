@@ -449,25 +449,18 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         )
         return
 
-   # ✅ 블랙리스트 체크 (디버깅 추가)
+   # ✅ 블랙리스트 체크
     cursor.execute(
       "SELECT group_id FROM blacklist WHERE guild_id=?",
-       (interaction.guild.id,),
+     (interaction.guild.id,),
     )
     blacklist_groups = set([row[0] for row in cursor.fetchall()])
 
-    print(f"DEBUG: blacklist_groups = {blacklist_groups}")  # 디버그
-
     if blacklist_groups:
-        # 비동기로 사용자 그룹 확인
-        user_groups = await roblox_get_user_groups(user_id)
+    # 비동기로 사용자 그룹 확인
+     user_groups = await roblox_get_user_groups(user_id)
 
-        print(f"DEBUG: user_groups for {로블닉} (ID {user_id}) = {user_groups}")  # 디버그
-    
-        # 블랙리스트 그룹에 속하는지 체크
-        blocked_groups = [g for g in user_groups if g in blacklist_groups]
-
-        print(f"DEBUG: blocked_groups = {blocked_groups}")  # 디버그
+    blocked_groups = [g for g in user_groups if g in blacklist_groups]
         
     if blocked_groups:
         await interaction.followup.send(

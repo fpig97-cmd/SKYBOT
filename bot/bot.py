@@ -38,7 +38,7 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN이 .env에 설정되어 있지 않습니다.")
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="/", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 error_logs: list[dict] = []
 MAX_LOGS = 50
@@ -1458,8 +1458,15 @@ async def on_ready():
     try:
         if GUILD_ID > 0:
             guild = discord.Object(id=GUILD_ID)
-            synced = await bot.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} commands to guild {GUILD_ID}")
+
+            bot.tree.clear_commands(guild=guild)  # 기존 커맨드 삭제
+            await bot.tree.sync(guild=guild)      # 다시 동기화
+
+            print(f"Guild {GUILD_ID} commands re-synced")
+
+        else:
+            await bot.tree.sync()
+
     except Exception as e:
         print("동기화 실패:", e)
 
@@ -1467,5 +1474,6 @@ async def on_ready():
 
     if not rank_log_task.is_running():
         rank_log_task.start()
+        
 if __name__ == "__main__":
     bot.run(TOKEN)

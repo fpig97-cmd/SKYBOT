@@ -1456,24 +1456,21 @@ async def before_rank_log_task():
 @bot.event
 async def on_ready():
     try:
-        if GUILD_ID > 0:
-            guild = discord.Object(id=GUILD_ID)
+        guild = discord.Object(id=GUILD_ID)
 
-            bot.tree.clear_commands(guild=guild)  # 기존 커맨드 삭제
-            await bot.tree.sync(guild=guild)      # 다시 동기화
+        # 🔥 전역 + 길드 전부 삭제
+        bot.tree.clear_commands(guild=None)
+        bot.tree.clear_commands(guild=guild)
 
-            print(f"Guild {GUILD_ID} commands re-synced")
+        await bot.tree.sync(guild=None)
+        await bot.tree.sync(guild=guild)
 
-        else:
-            await bot.tree.sync()
+        print("전체 커맨드 강제 초기화 완료")
 
     except Exception as e:
         print("동기화 실패:", e)
 
     print(f"Logged in as {bot.user}")
-
-    if not rank_log_task.is_running():
-        rank_log_task.start()
         
 if __name__ == "__main__":
     bot.run(TOKEN)

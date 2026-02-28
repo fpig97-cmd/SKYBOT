@@ -583,7 +583,7 @@ async def configure(interaction: discord.Interaction, 역할: discord.Role):
         f"인증 역할을 {역할.mention}로 설정했습니다.", ephemeral=True
     )
 
-@bot.tree.command(name="역할전체", description="서버 역할과 봇 역할을 10개씩 출력합니다.")
+@bot.tree.command(name="역할목록", description="서버 역할과 봇 역할을 10개씩 출력합니다.")
 async def role_all(interaction: discord.Interaction):
 
     if not interaction.user.guild_permissions.administrator:

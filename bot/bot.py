@@ -1187,7 +1187,10 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="일괄닉네임변경", description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)")
+@bot.tree.command(
+    name="일괄닉네임변경",
+    description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)"
+)
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def bulk_nickname_change(interaction: discord.Interaction):
     if not is_admin(interaction.user):
@@ -1210,7 +1213,7 @@ async def bulk_nickname_change(interaction: discord.Interaction):
 
         # 모든 유저의 현재 랭크 조회
         usernames = [row[1] for row in users_data]
-        
+
         resp = requests.post(
             f"{RANK_API_URL_ROOT}/bulk-status",
             json={"usernames": usernames},
@@ -1225,13 +1228,13 @@ async def bulk_nickname_change(interaction: discord.Interaction):
             return
 
         data = resp.json()
-        
+
         # username -> rank_name 매핑
         rank_map = {}
         for r in data.get("results", []):
             if r.get("success"):
-                role_info = r.get("role", {})
-                rank_map[r['username']] = role_info.get('name', '?')
+                role_info = r.get("role", {}) or {}
+                rank_map[r["username"]] = role_info.get("name", "?")
 
         updated = 0
         failed = 0
@@ -1239,23 +1242,31 @@ async def bulk_nickname_change(interaction: discord.Interaction):
         for discord_id, roblox_nick in users_data:
             try:
                 member = interaction.guild.get_member(discord_id)
-                if member:
-                    rank_name = rank_map.get(roblox_nick, '?')
-                    new_nick = f"[{rank_name}] {roblox_nick}"
-                    
-                    # 닉네임 32자 제한
-                    if len(new_nick) > 32:
-                        new_nick = new_nick[:32]
-                    
-                    await member.edit(nick=new_nick)
-                    updated += 1
+                if not member:
+                    failed += 1
+                    continue
+
+                rank_name = rank_map.get(roblox_nick, "?") or "?"
+
+                # ROKA | 육군 → 육군
+                if " | " in rank_name:
+                    rank_name = rank_name.split(" | ")[-1]
+
+                new_nick = f"[{rank_name}] {roblox_nick}"
+
+                if len(new_nick) > 32:
+                    new_nick = new_nick[:32]
+
+                await member.edit(nick=new_nick)
+                updated += 1
+
             except Exception as e:
                 print(f"닉네임 변경 실패 {roblox_nick}: {e}")
                 failed += 1
 
         embed = discord.Embed(
             title="일괄 닉네임 변경 완료",
-            color=discord.Color.blue()
+            color=discord.Color.blue(),
         )
         embed.add_field(name="성공", value=str(updated), inline=True)
         embed.add_field(name="실패", value=str(failed), inline=True)

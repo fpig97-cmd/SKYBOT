@@ -1351,7 +1351,7 @@ async def view_blacklist(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="업데이트", description="유저의 Roblox 닉네임을 업데이트하고 Discord 닉네임을 변경합니다. (관리자)")
+@bot.tree.command(name="업데이트", description="유저의 Discord 닉네임을 변경합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(
     user="디스코드 유저 멘션",
@@ -1415,11 +1415,14 @@ async def update_user(interaction: discord.Interaction, user: discord.User, new_
         print(f"랭크 조회 실패: {e}")
         rank_name = "?"
 
-    # 5. Discord 닉네임 변경 ([랭크] 새로운닉)
+    # 5. Discord 닉네임 변경 ([랭크] 만 사용)
     member = interaction.guild.get_member(user.id)
     if member:
         try:
-            new_nick = f"[{rank_name}] {new_roblox_nick}"
+            # 로블닉 제거, 랭크만 사용
+            new_nick = f"[{rank_name}]"
+
+            # 닉네임은 최대 32자 제한 있음
             if len(new_nick) > 32:
                 new_nick = new_nick[:32]
             
@@ -1432,10 +1435,10 @@ async def update_user(interaction: discord.Interaction, user: discord.User, new_
         color=discord.Color.green()
     )
     embed.add_field(name="유저", value=user.mention, inline=True)
-    embed.add_field(name="새 Discord 닉네임", value=f"[{rank_name}] {new_roblox_nick}", inline=True)
+    embed.add_field(name="새 Discord 닉네임", value=f"[{rank_name}]", inline=True)
     
     await interaction.followup.send(embed=embed, ephemeral=True)
-
+    
 @tasks.loop(hours=6)
 async def sync_all_nicknames_task():
     """6시간마다 전체 유저의 Roblox 정보를 동기화하고 닉네임 업데이트"""

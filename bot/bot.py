@@ -11,7 +11,7 @@ from typing import Optional
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import tasks
+from discord.ext import tasksㅁ
 from discord.ext import commands
 from dotenv import load_dotenv
 import requests
@@ -21,6 +21,8 @@ import requests
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)
+
+OFFICER_ROLE_ID = "1477313558474920057"
 
 TOKEN = str(os.getenv("DISCORD_TOKEN"))
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -1532,107 +1534,93 @@ async def before_sync_all_nicknames_task():
 async def officer_role_sync_task():
     """5분마다 인증된 유저의 랭크를 체크하여 위관급 장교 역할 자동 부여/해제"""
     try:
-        # 위관급 역할이 설정된 서버만 조회
-        cursor.execute("SELECT guild_id FROM officer_settings")
-        settings = cursor.fetchall()
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            return
 
-        for (guild_id,) in settings:
-            guild = bot.get_guild(guild_id)
-            if not guild:
+        officer_role = guild.get_role(OFFICER_ROLE_ID)
+        if not officer_role:
+            return
+
+        # 인증된 모든 유저 조회
+        cursor.execute(
+            "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+            (GUILD_ID,),
+        )
+        users = cursor.fetchall()
+        if not users:
+            return
+
+        usernames = [u[1] for u in users]
+
+        BATCH_SIZE = 100
+        for i in range(0, len(usernames), BATCH_SIZE):
+            batch = usernames[i:i + BATCH_SIZE]
+
+            try:
+                # 현재 Roblox 랭크 일괄 조회
+                resp = requests.post(
+                    f"{RANK_API_URL_ROOT}/bulk-status",
+                    json={"usernames": batch},
+                    headers=_rank_api_headers(),
+                    timeout=30,
+                )
+
+                if resp.status_code == 200:
+                    data = resp.json()
+
+                    # username -> rank 정보 매핑
+                    rank_map = {}
+                    for r in data.get("results", []):
+                        if r.get("success"):
+                            role_info = r.get("role", {})
+                            rank_map[r["username"]] = {
+                                "name": role_info.get("name", ""),
+                                "rank": role_info.get("rank", 0),
+                            }
+
+                    # 각 유저의 역할 부여/해제
+                    for discord_id, roblox_nick in users:
+                        if roblox_nick not in rank_map:
+                            continue
+
+                        member = guild.get_member(discord_id)
+                        if not member:
+                            continue
+
+                        info = rank_map[roblox_nick]
+                        rank_name = info["name"]
+                        rank_num = info["rank"]
+
+                        # 위관급 판정 (예: 80~120)
+                        is_officer = 80 <= rank_num <= 120
+
+                        # 이름으로도 판정 (한글/영문 모두)
+                        officer_keywords = [
+                            "Second Lieutenant", "First Lieutenant", "Captain",
+                            "Major", "Lieutenant Colonel",
+                            "소위", "중위", "대위", "소령", "중령",
+                        ]
+                        if any(kw.lower() in rank_name.lower() for kw in officer_keywords):
+                            is_officer = True
+
+                        # 역할 부여/해제
+                        try:
+                            if is_officer and officer_role not in member.roles:
+                                await member.add_roles(officer_role)
+                                print(f"[{guild.name}] {member} 위관급 역할 부여")
+                            elif not is_officer and officer_role in member.roles:
+                                await member.remove_roles(officer_role)
+                                print(f"[{guild.name}] {member} 위관급 역할 해제")
+                        except Exception as e:
+                            print(f"역할 변경 실패 {member}: {e}")
+
+                # Rate limit 방지
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                print(f"Batch {i} officer sync error: {e}")
                 continue
-
-            # 위관급 역할 ID 가져오기
-            officer_role_id = get_officer_role_id(guild_id)
-            if not officer_role_id:
-                continue
-            
-            officer_role = guild.get_role(officer_role_id)
-            if not officer_role:
-                continue
-
-            # 인증된 모든 유저 조회
-            cursor.execute(
-                "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
-                (guild_id,),
-            )
-            users = cursor.fetchall()
-
-            if not users:
-                continue
-
-            usernames = [u[1] for u in users]
-            
-            # 배치 처리 (100명씩)
-            BATCH_SIZE = 100
-            for i in range(0, len(usernames), BATCH_SIZE):
-                batch = usernames[i:i + BATCH_SIZE]
-                
-                try:
-                    # 현재 Roblox 랭크 일괄 조회
-                    resp = requests.post(
-                        f"{RANK_API_URL_ROOT}/bulk-status",
-                        json={"usernames": batch},
-                        headers=_rank_api_headers(),
-                        timeout=30,
-                    )
-
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        
-                        # username -> rank 정보 매핑
-                        rank_map = {}
-                        for r in data.get("results", []):
-                            if r.get("success"):
-                                role_info = r.get("role", {})
-                                rank_map[r['username']] = {
-                                    "name": role_info.get("name", ""),
-                                    "rank": role_info.get("rank", 0)
-                                }
-                        
-                        # 각 유저의 역할 부여/해제
-                        for discord_id, roblox_nick in users:
-                            if roblox_nick not in rank_map:
-                                continue
-                            
-                            member = guild.get_member(discord_id)
-                            if not member:
-                                continue
-                            
-                            info = rank_map[roblox_nick]
-                            rank_name = info["name"]
-                            rank_num = info["rank"]
-                            
-                            # 위관급 판정 (소위=20, 중령=80 가정)
-                            is_officer = False
-                            if 80 <= rank_num <= 120:
-                                is_officer = True
-                            
-                            # 이름으로도 판정 (한글/영문 모두)
-                            officer_keywords = [
-                                "Second Lieutenant", "First Lieutenant", "Captain", 
-                                "Major", "Lieutenant Colonel", 
-                                "소위", "중위", "대위", "소령", "중령"
-                            ]
-                            if any(kw.lower() in rank_name.lower() for kw in officer_keywords):
-                                is_officer = True
-                            
-                            # 역할 부여/해제
-                            try:
-                                if is_officer and officer_role not in member.roles:
-                                    await member.add_roles(officer_role)
-                                    print(f"[{guild.name}] {member} 위관급 역할 부여")
-                                elif not is_officer and officer_role in member.roles:
-                                    await member.remove_roles(officer_role)
-                                    print(f"[{guild.name}] {member} 위관급 역할 해제")
-                            except Exception as e:
-                                print(f"역할 변경 실패 {member}: {e}")
-                    
-                    # Rate limit 방지
-                    await asyncio.sleep(1)
-                    
-                except Exception as e:
-                    print(f"Batch {i} officer sync error: {e}")
-                    continue
 
     except Exception as e:
         print(f"officer_role_sync_task error: {e}")

@@ -438,7 +438,7 @@ class VerifyView(discord.ui.View):
 
             # 역할 부여
             await member.add_roles(role)
-            
+
             # 닉네임 변경 (원래 네 코드 그대로, headers만 정확히)
             try:
                 resp = requests.post(
@@ -470,7 +470,7 @@ class VerifyView(discord.ui.View):
             new_nick = new_nick[:32]
 
         await member.edit(nick=new_nick)
-
+        
             except Exception as e:
                 print(f"닉네임 변경 실패: {e}")
                 # 실패해도 인증은 완료

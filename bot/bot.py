@@ -204,27 +204,38 @@ def set_guild_admin_role_ids(guild_id: int, role_ids: list[int]) -> None:
     conn.commit()
 
 
+def is_owner(user: discord.abc.User | discord.Member) -> bool:
+    if OWNER_ID <= 0:
+        return False
+    return int(user.id) == int(OWNER_ID)
+
+
 def is_admin(member: discord.Member) -> bool:
-    # 🔥 제작자는 어떤 서버든 무조건 통과
-    if OWNER_ID > 0 and member.id == OWNER_ID:
+    # 1) 제작자
+    if is_owner(member):
         return True
 
-    # 디스코드 서버 관리자 권한
-    if member.guild_permissions.administrator:
-        return True
-
-    # 설정된 관리자 역할
-    admin_ids = get_guild_admin_role_ids(member.guild.id)
-    for rid in admin_ids:
-        role = member.guild.get_role(int(rid))
-        if role and role in member.roles:
+    # 2) 서버 관리자 권한
+    try:
+        if member.guild_permissions.administrator:
             return True
+    except AttributeError:
+        return False
+
+    # 3) 설정된 관리자 역할
+    guild = member.guild
+    if guild is None:
+        return False
+
+    admin_ids = get_guild_admin_role_ids(guild.id)
+    if not admin_ids:
+        return False
+
+    member_role_ids = {r.id for r in member.roles}
+    if any(rid in member_role_ids for rid in admin_ids):
+        return True
 
     return False
-
-
-def is_owner(user_id: int) -> bool:
-    return OWNER_ID > 0 and user_id == OWNER_ID
 
 def _rank_api_headers():
     return {

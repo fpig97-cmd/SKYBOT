@@ -25,8 +25,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)
 
-OFFICER_ROLE_ID = "1477313558474920057"
-TARGET_ROLE_ID = "1461636782176075831"
+OFFICER_ROLE_ID = 1477313558474920057
+TARGET_ROLE_ID = 1461636782176075831
 
 TOKEN = str(os.getenv("DISCORD_TOKEN"))
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -1411,7 +1411,7 @@ async def set_all_role(interaction: discord.Interaction):
         f"위상/조건으로 스킵: {skipped}명",
         ephemeral=True
     )
-    
+
 @bot.tree.command(name="업데이트", description="유저의 Discord 닉네임을 변경합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(

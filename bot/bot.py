@@ -18,6 +18,9 @@ import requests
 
 # ---------- 기본 설정 ----------
 
+intents = discord.Intents.default()
+intents.members = True
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)

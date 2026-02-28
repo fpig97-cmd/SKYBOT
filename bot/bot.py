@@ -11,7 +11,7 @@ from typing import Optional
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import tasksㅁ
+from discord.ext import tasks
 from discord.ext import commands
 from dotenv import load_dotenv
 import requests

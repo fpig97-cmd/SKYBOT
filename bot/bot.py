@@ -120,6 +120,14 @@ cursor.execute(
 )
 
 cursor.execute(
+    """CREATE TABLE IF NOT EXISTS officer_settings(
+        guild_id INTEGER PRIMARY KEY,
+        officer_role_id INTEGER
+    )"""
+)
+conn.commit()
+
+cursor.execute(
     """CREATE TABLE IF NOT EXISTS group_settings(
         guild_id INTEGER PRIMARY KEY,
         group_id INTEGER
@@ -319,6 +327,20 @@ async def roblox_get_description_by_user_id(user_id: int) -> Optional[str]:
         except Exception as e:
             add_error_log(f"roblox_get_description: {repr(e)}")
             return None
+        
+def get_officer_role_id(guild_id: int) -> Optional[int]:
+    cursor.execute("SELECT officer_role_id FROM officer_settings WHERE guild_id=?", (guild_id,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def set_officer_role_id(guild_id: int, role_id: int) -> None:
+    cursor.execute(
+        """INSERT OR REPLACE INTO officer_settings(guild_id, officer_role_id)
+           VALUES(?, ?)""",
+        (guild_id, role_id),
+    )
+    conn.commit()
+
 
 # ---------- 인증 View ----------
 
@@ -1329,6 +1351,286 @@ async def view_blacklist(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="업데이트", description="유저의 Roblox 닉네임을 업데이트하고 Discord 닉네임을 변경합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    user="디스코드 유저 멘션",
+)
+async def update_user(interaction: discord.Interaction, user: discord.User, new_roblox_nick: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # 1. 새로운 Roblox 유저 ID 확인
+    new_user_id = await roblox_get_user_id_by_username(new_roblox_nick)
+    if not new_user_id:
+        await interaction.followup.send(
+            f"해당 닉네임 ({new_roblox_nick}) 의 로블록스 계정을 찾을 수 없습니다.",
+            ephemeral=True
+        )
+        return
+
+    # 2. DB에서 기존 유저 정보 확인
+    cursor.execute(
+        "SELECT verified FROM users WHERE discord_id=? AND guild_id=?",
+        (user.id, interaction.guild.id),
+    )
+    data = cursor.fetchone()
+
+    if not data or data[0] == 0:
+        await interaction.followup.send(
+            f"{user.mention}은(는) 인증된 유저가 아닙니다. 먼저 인증해주세요.",
+            ephemeral=True
+        )
+        return
+
+    # 3. DB 업데이트 (roblox_nick, roblox_user_id)
+    cursor.execute(
+        """UPDATE users 
+           SET roblox_nick=?, roblox_user_id=? 
+           WHERE discord_id=? AND guild_id=?""",
+        (new_roblox_nick, new_user_id, user.id, interaction.guild.id)
+    )
+    conn.commit()
+
+    # 4. 현재 Roblox 랭크 조회
+    try:
+        resp = requests.post(
+            f"{RANK_API_URL_ROOT}/bulk-status",
+            json={"usernames": [new_roblox_nick]},
+            headers=_rank_api_headers(),
+            timeout=15,
+        )
+        
+        rank_name = "?"
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            if results and results[0].get("success"):
+                role_info = results[0].get("role", {})
+                rank_name = role_info.get("name", "?")
+    except Exception as e:
+        print(f"랭크 조회 실패: {e}")
+        rank_name = "?"
+
+    # 5. Discord 닉네임 변경 ([랭크] 새로운닉)
+    member = interaction.guild.get_member(user.id)
+    if member:
+        try:
+            new_nick = f"[{rank_name}] {new_roblox_nick}"
+            if len(new_nick) > 32:
+                new_nick = new_nick[:32]
+            
+            await member.edit(nick=new_nick)
+        except Exception as e:
+            print(f"닉네임 변경 실패: {e}")
+
+    embed = discord.Embed(
+        title="유저 정보 업데이트 완료",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="유저", value=user.mention, inline=True)
+    embed.add_field(name="새 Discord 닉네임", value=f"[{rank_name}] {new_roblox_nick}", inline=True)
+    
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@tasks.loop(hours=6)
+async def sync_all_nicknames_task():
+    """6시간마다 전체 유저의 Roblox 정보를 동기화하고 닉네임 업데이트"""
+    try:
+        cursor.execute("SELECT guild_id FROM rank_log_settings WHERE enabled=1")
+        settings = cursor.fetchall()
+
+        for (guild_id,) in settings:
+            guild = bot.get_guild(guild_id)
+            if not guild:
+                continue
+
+            # 인증된 모든 유저 조회
+            cursor.execute(
+                "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+                (guild_id,),
+            )
+            users = cursor.fetchall()
+
+            if not users:
+                continue
+
+            usernames = [u[1] for u in users]
+            
+            # 배치 처리 (100명씩)
+            BATCH_SIZE = 100
+            for i in range(0, len(usernames), BATCH_SIZE):
+                batch = usernames[i:i + BATCH_SIZE]
+                
+                try:
+                    # 현재 Roblox 정보 조회
+                    resp = requests.post(
+                        f"{RANK_API_URL_ROOT}/bulk-status",
+                        json={"usernames": batch},
+                        headers=_rank_api_headers(),
+                        timeout=30,
+                    )
+
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        
+                        for r in data.get("results", []):
+                            if r.get("success"):
+                                username = r['username']
+                                role_info = r.get("role", {})
+                                rank_name = role_info.get("name", "?")
+                                
+                                # Discord 닉네임 업데이트
+                                for discord_id, roblox_nick in users:
+                                    if roblox_nick == username:
+                                        member = guild.get_member(discord_id)
+                                        if member:
+                                            try:
+                                                new_nick = f"[{rank_name}] {username}"
+                                                if len(new_nick) > 32:
+                                                    new_nick = new_nick[:32]
+                                                
+                                                # 닉네임이 다를 때만 변경
+                                                if member.nick != new_nick:
+                                                    await member.edit(nick=new_nick)
+                                            except Exception as e:
+                                                print(f"닉네임 변경 실패 {username}: {e}")
+                                        break
+                    
+                    # Rate limit 방지
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    print(f"Batch {i} sync error: {e}")
+                    continue
+
+        print(f"[{datetime.now()}] 전체 닉네임 동기화 완료")
+        
+    except Exception as e:
+        print(f"sync_all_nicknames_task error: {e}")
+
+
+@sync_all_nicknames_task.before_loop
+async def before_sync_all_nicknames_task():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=5)
+async def officer_role_sync_task():
+    """5분마다 인증된 유저의 랭크를 체크하여 위관급 장교 역할 자동 부여/해제"""
+    try:
+        # 위관급 역할이 설정된 서버만 조회
+        cursor.execute("SELECT guild_id FROM officer_settings")
+        settings = cursor.fetchall()
+
+        for (guild_id,) in settings:
+            guild = bot.get_guild(guild_id)
+            if not guild:
+                continue
+
+            # 위관급 역할 ID 가져오기
+            officer_role_id = get_officer_role_id(guild_id)
+            if not officer_role_id:
+                continue
+            
+            officer_role = guild.get_role(officer_role_id)
+            if not officer_role:
+                continue
+
+            # 인증된 모든 유저 조회
+            cursor.execute(
+                "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+                (guild_id,),
+            )
+            users = cursor.fetchall()
+
+            if not users:
+                continue
+
+            usernames = [u[1] for u in users]
+            
+            # 배치 처리 (100명씩)
+            BATCH_SIZE = 100
+            for i in range(0, len(usernames), BATCH_SIZE):
+                batch = usernames[i:i + BATCH_SIZE]
+                
+                try:
+                    # 현재 Roblox 랭크 일괄 조회
+                    resp = requests.post(
+                        f"{RANK_API_URL_ROOT}/bulk-status",
+                        json={"usernames": batch},
+                        headers=_rank_api_headers(),
+                        timeout=30,
+                    )
+
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        
+                        # username -> rank 정보 매핑
+                        rank_map = {}
+                        for r in data.get("results", []):
+                            if r.get("success"):
+                                role_info = r.get("role", {})
+                                rank_map[r['username']] = {
+                                    "name": role_info.get("name", ""),
+                                    "rank": role_info.get("rank", 0)
+                                }
+                        
+                        # 각 유저의 역할 부여/해제
+                        for discord_id, roblox_nick in users:
+                            if roblox_nick not in rank_map:
+                                continue
+                            
+                            member = guild.get_member(discord_id)
+                            if not member:
+                                continue
+                            
+                            info = rank_map[roblox_nick]
+                            rank_name = info["name"]
+                            rank_num = info["rank"]
+                            
+                            # 위관급 판정 (소위=20, 중령=80 가정)
+                            is_officer = False
+                            if 80 <= rank_num <= 120:
+                                is_officer = True
+                            
+                            # 이름으로도 판정 (한글/영문 모두)
+                            officer_keywords = [
+                                "Second Lieutenant", "First Lieutenant", "Captain", 
+                                "Major", "Lieutenant Colonel", 
+                                "소위", "중위", "대위", "소령", "중령"
+                            ]
+                            if any(kw.lower() in rank_name.lower() for kw in officer_keywords):
+                                is_officer = True
+                            
+                            # 역할 부여/해제
+                            try:
+                                if is_officer and officer_role not in member.roles:
+                                    await member.add_roles(officer_role)
+                                    print(f"[{guild.name}] {member} 위관급 역할 부여")
+                                elif not is_officer and officer_role in member.roles:
+                                    await member.remove_roles(officer_role)
+                                    print(f"[{guild.name}] {member} 위관급 역할 해제")
+                            except Exception as e:
+                                print(f"역할 변경 실패 {member}: {e}")
+                    
+                    # Rate limit 방지
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    print(f"Batch {i} officer sync error: {e}")
+                    continue
+
+    except Exception as e:
+        print(f"officer_role_sync_task error: {e}")
+
+
+@officer_role_sync_task.before_loop
+async def before_officer_role_sync_task():
+    await bot.wait_until_ready()
+
 @tasks.loop(seconds=5)
 async def rank_log_task():
     """5분마다 그룹 가입자들의 랭크를 로그"""
@@ -1503,20 +1805,29 @@ async def before_rank_log_task():
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    print(f"로그인: {bot.user} (id={bot.user.id})")
     try:
-        # 특정 길드에만 등록하고 싶으면 GUILD_ID 사용
-        if GUILD_ID:
+        # GUILD_ID 서버 먼저 동기화
+        if GUILD_ID > 0:
             guild = discord.Object(id=GUILD_ID)
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            print(f"슬래시 명령 동기화 완료 (guild={GUILD_ID})")
-        else:
-            # 전체 글로벌 커맨드 동기화
-            await bot.tree.sync()
-            print("글로벌 슬래시 명령 동기화 완료")
+            synced_guild = await bot.tree.sync(guild=guild)
+            print(f"Synced {len(synced_guild)} commands to guild {GUILD_ID} (즉시 적용)")
+        
+        # 전역 동기화
+        synced_global = await bot.tree.sync()
+        print(f"Synced {len(synced_global)} commands globally (15분 후 적용)")
+        
     except Exception as e:
-        print(f"슬래시 명령 동기화 실패: {e}")
+        print("동기화 실패:", e)
+    
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    # 태스크 시작
+    if not rank_log_task.is_running():
+        rank_log_task.start()
+    
+    # ✅ 새로운 태스크 시작
+    if not sync_all_nicknames_task.is_running():
+        sync_all_nicknames_task.start()
 
 if __name__ == "__main__":
     bot.run(TOKEN)

@@ -23,6 +23,7 @@ env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)
 
 OFFICER_ROLE_ID = "1477313558474920057"
+TARGET_ROLE_ID = "1461636782176075831"
 
 TOKEN = str(os.getenv("DISCORD_TOKEN"))
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -1352,6 +1353,49 @@ async def view_blacklist(interaction: discord.Interaction):
         embed.description = "\n".join(group_ids)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="역할전체변경", description="모든 유저의 역할을 한 역할로 통일합니다. (위험)")
+async def set_all_role(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_roles:
+        await interaction.response.send_message("역할 관리 권한이 필요합니다.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    if guild.id != GUILD_ID:
+        await interaction.response.send_message("이 명령어는 지정된 서버에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    target_role = guild.get_role(TARGET_ROLE_ID)
+    if not target_role:
+        await interaction.response.send_message("대상 역할을 찾을 수 없습니다.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("모든 멤버 역할 변경 시작...", ephemeral=True)
+
+    # 멤버 루프 돌면서 roles를 [@everyone, TARGET_ROLE] 로 재설정
+    success = 0
+    failed = 0
+
+    for member in guild.members:
+        # 봇 자기 자신, 서버 주인 제외 등 조건 넣고 싶으면 여기서 필터
+        if member.bot:
+            continue
+
+        try:
+            # @everyone 역할은 roles[0] 에 있음 (지우면 안 됨)[web:58]
+            everyone = member.roles[0]
+            new_roles = [everyone, target_role]
+
+            await member.edit(roles=new_roles)
+            success += 1
+        except Exception as e:
+            print(f"{member} 역할 변경 실패: {e}")
+            failed += 1
+
+    await interaction.followup.send(
+        f"역할 변경 완료: 성공 {success}명, 실패 {failed}명",
+        ephemeral=True
+    )
 
 @bot.tree.command(name="업데이트", description="유저의 Discord 닉네임을 변경합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))

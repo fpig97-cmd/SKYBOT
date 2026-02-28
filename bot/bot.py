@@ -438,7 +438,7 @@ class VerifyView(discord.ui.View):
 
             # 역할 부여
             await member.add_roles(role)
-
+            
             # 닉네임 변경 (원래 네 코드 그대로, headers만 정확히)
             try:
                 resp = requests.post(
@@ -448,19 +448,29 @@ class VerifyView(discord.ui.View):
                     timeout=15,
                 )
                 
+                
+             if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            if results and results[0].get("success"):
+                role_info = results[0].get("role", {})
+                rank_name = role_info.get("name", "?")
+            else:
                 rank_name = "?"
-                if resp.status_code == 200:
-                    data = resp.json()
-                    results = data.get("results", [])
-                    if results and results[0].get("success"):
-                        role_info = results[0].get("role", {})
-                        rank_name = role_info.get("name", "?")
-                
-                new_nick = f"[{rank_name}] {nick}"
-                if len(new_nick) > 32:
-                    new_nick = new_nick[:32]
-                
-                await member.edit(nick=new_nick)
+            else:
+        rank_name = "?"
+
+        # 여기서 ROKA | 육군 → 육군 으로 정제
+        if " | " in rank_name:
+            rank_name = rank_name.split(" | ")[-1]
+
+        new_nick = f"[{rank_name}] {nick}"
+
+        if len(new_nick) > 32:
+            new_nick = new_nick[:32]
+
+        await member.edit(nick=new_nick)
+
             except Exception as e:
                 print(f"닉네임 변경 실패: {e}")
                 # 실패해도 인증은 완료

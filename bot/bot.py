@@ -497,6 +497,7 @@ class VerifyView(discord.ui.View):
                 )
     
 # ---------- 슬래시 명령어 ----------
+
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):
@@ -600,7 +601,7 @@ async def configure(interaction: discord.Interaction, 역할: discord.Role):
         f"인증 역할을 {역할.mention}로 설정했습니다.", ephemeral=True
     )
 
-@bot.tree.command(name="역할전체", description="서버 역할과 봇 역할을 10개씩 출력합니다.")
+@bot.tree.command(name="역할목록", description="서버 역할과 봇 역할을 10개씩 출력합니다.(관리자)")
 async def role_all(interaction: discord.Interaction):
 
     if not is_admin(interaction.user):
@@ -618,7 +619,7 @@ async def role_all(interaction: discord.Interaction):
 
         for idx, chunk in enumerate(chunks, start=1):
             embed = discord.Embed(
-                title=f"📋 서버 역할 목록 (총 {len(roles)}개) ({idx}/{len(chunks)})",
+                title=f"서버 역할 목록 (총 {len(roles)}개) ({idx}/{len(chunks)})",
                 color=discord.Color.blue()
             )
 
@@ -639,7 +640,7 @@ async def role_all(interaction: discord.Interaction):
 
         for idx, chunk in enumerate(chunks, start=1):
             embed = discord.Embed(
-                title=f"🤖 봇 역할 목록 (총 {len(bot_roles)}개) ({idx}/{len(chunks)})",
+                title=f"봇 역할 목록 (총 {len(bot_roles)}개) ({idx}/{len(chunks)})",
                 color=discord.Color.green()
             )
 
@@ -1502,13 +1503,20 @@ async def before_rank_log_task():
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    print(f'{bot.user} 로그인')
-    if GUILD_ID:  # .env에 서버 ID 넣음
-        guild = discord.Object(id=GUILD_ID)
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)  # 길드만 sync
-    else:
-        await bot.tree.sync()  # 전역만
-        
+    print(f"로그인: {bot.user} (id={bot.user.id})")
+    try:
+        # 특정 길드에만 등록하고 싶으면 GUILD_ID 사용
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+            print(f"슬래시 명령 동기화 완료 (guild={GUILD_ID})")
+        else:
+            # 전체 글로벌 커맨드 동기화
+            await bot.tree.sync()
+            print("글로벌 슬래시 명령 동기화 완료")
+    except Exception as e:
+        print(f"슬래시 명령 동기화 실패: {e}")
+
 if __name__ == "__main__":
     bot.run(TOKEN)

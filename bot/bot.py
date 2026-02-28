@@ -1355,8 +1355,14 @@ async def view_blacklist(interaction: discord.Interaction):
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(
     user="디스코드 유저 멘션",
+    roblox_nick="로블록스 닉네임",
 )
-async def update_user(interaction: discord.Interaction, user: discord.User, new_roblox_nick: str):
+async def update_user(
+    interaction: discord.Interaction,
+    user: discord.User,
+    new_roblox_nick: str
+):
+    # 관리자 체크
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
@@ -1388,9 +1394,11 @@ async def update_user(interaction: discord.Interaction, user: discord.User, new_
 
     # 3. DB 업데이트 (roblox_nick, roblox_user_id)
     cursor.execute(
-        """UPDATE users 
-           SET roblox_nick=?, roblox_user_id=? 
-           WHERE discord_id=? AND guild_id=?""",
+        """
+        UPDATE users 
+        SET roblox_nick = ?, roblox_user_id = ?
+        WHERE discord_id = ? AND guild_id = ?
+        """,
         (new_roblox_nick, new_user_id, user.id, interaction.guild.id)
     )
     conn.commit()
@@ -1403,7 +1411,7 @@ async def update_user(interaction: discord.Interaction, user: discord.User, new_
             headers=_rank_api_headers(),
             timeout=15,
         )
-        
+
         rank_name = "?"
         if resp.status_code == 200:
             data = resp.json()
@@ -1415,28 +1423,28 @@ async def update_user(interaction: discord.Interaction, user: discord.User, new_
         print(f"랭크 조회 실패: {e}")
         rank_name = "?"
 
-    # 5. Discord 닉네임 변경 ([랭크] 만 사용)
+    # 5. Discord 닉네임 변경: [랭크] 만 사용 (로블닉 제외)
     member = interaction.guild.get_member(user.id)
     if member:
         try:
-            # 로블닉 제거, 랭크만 사용
             new_nick = f"[{rank_name}]"
 
-            # 닉네임은 최대 32자 제한 있음
+            # 닉네임 길이 제한 (32자)
             if len(new_nick) > 32:
                 new_nick = new_nick[:32]
-            
+
             await member.edit(nick=new_nick)
         except Exception as e:
             print(f"닉네임 변경 실패: {e}")
 
+    # 6. 결과 응답
     embed = discord.Embed(
         title="유저 정보 업데이트 완료",
         color=discord.Color.green()
     )
     embed.add_field(name="유저", value=user.mention, inline=True)
     embed.add_field(name="새 Discord 닉네임", value=f"[{rank_name}]", inline=True)
-    
+
     await interaction.followup.send(embed=embed, ephemeral=True)
     
 @tasks.loop(hours=6)

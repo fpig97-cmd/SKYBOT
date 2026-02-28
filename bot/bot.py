@@ -597,7 +597,7 @@ async def configure(interaction: discord.Interaction, 역할: discord.Role):
 @bot.tree.command(name="역할전체", description="서버 역할과 봇 역할을 10개씩 출력합니다.")
 async def role_all(interaction: discord.Interaction):
 
-    if not interaction.user.guild_permissions.administrator:
+    if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용 가능합니다.", ephemeral=True)
         return
 
@@ -1115,18 +1115,16 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
 
 @bot.tree.command(name="동기화", description="슬래시 명령어를 다시 동기화합니다. (관리자)")
 async def sync_commands(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
+    if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용 가능합니다.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
     try:
         if interaction.guild:
-            # 현재 길드에만 동기화
             await bot.tree.sync(guild=interaction.guild)
             msg = f"{interaction.guild.name}({interaction.guild.id}) 에서 슬래시 명령 동기화 완료"
         else:
-            # DM 등에서는 글로벌로
             await bot.tree.sync()
             msg = "글로벌 슬래시 명령 동기화 완료"
 

@@ -1362,7 +1362,7 @@ async def view_blacklist(interaction: discord.Interaction):
 async def update_user(
     interaction: discord.Interaction,
     user: discord.User,
-    new_roblox_nick: str
+    roblox_nick: str
 ):
     # 관리자 체크
     if not is_admin(interaction.user):
@@ -1372,10 +1372,10 @@ async def update_user(
     await interaction.response.defer(ephemeral=True)
 
     # 1. 새로운 Roblox 유저 ID 확인
-    new_user_id = await roblox_get_user_id_by_username(new_roblox_nick)
+    new_user_id = await roblox_get_user_id_by_username(roblox_nick)
     if not new_user_id:
         await interaction.followup.send(
-            f"해당 닉네임 ({new_roblox_nick}) 의 로블록스 계정을 찾을 수 없습니다.",
+            f"해당 닉네임 ({roblox_nick}) 의 로블록스 계정을 찾을 수 없습니다.",
             ephemeral=True
         )
         return
@@ -1401,7 +1401,7 @@ async def update_user(
         SET roblox_nick = ?, roblox_user_id = ?
         WHERE discord_id = ? AND guild_id = ?
         """,
-        (new_roblox_nick, new_user_id, user.id, interaction.guild.id)
+        (roblox_nick, new_user_id, user.id, interaction.guild.id)
     )
     conn.commit()
 
@@ -1409,7 +1409,7 @@ async def update_user(
     try:
         resp = requests.post(
             f"{RANK_API_URL_ROOT}/bulk-status",
-            json={"usernames": [new_roblox_nick]},
+            json={"usernames": [roblox_nick]},
             headers=_rank_api_headers(),
             timeout=15,
         )

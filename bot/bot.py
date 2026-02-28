@@ -563,7 +563,7 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         await interaction.followup.send(
             "DM 전송 실패. DM 수신을 허용해주세요.", ephemeral=True
         )
-
+    
 @bot.tree.command(name="설정", description="인증 역할 설정 (관리자)")
 @app_commands.describe(역할="인증 역할")
 async def configure(interaction: discord.Interaction, 역할: discord.Role):
@@ -1102,6 +1102,27 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
     
     await interaction.followup.send(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="동기화", description="슬래시 명령어를 다시 동기화합니다. (관리자)")
+async def sync_commands(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("관리자만 사용 가능합니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if interaction.guild:
+            # 현재 길드에만 동기화
+            await bot.tree.sync(guild=interaction.guild)
+            msg = f"{interaction.guild.name}({interaction.guild.id}) 에서 슬래시 명령 동기화 완료"
+        else:
+            # DM 등에서는 글로벌로
+            await bot.tree.sync()
+            msg = "글로벌 슬래시 명령 동기화 완료"
+
+        await interaction.followup.send(msg, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"동기화 중 오류: {e}", ephemeral=True)
+
 @bot.tree.command(name="강제인증", description="유저를 강제로 인증 처리합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(
@@ -1455,21 +1476,20 @@ async def before_rank_log_task():
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    print("on_ready 진입")
-
+    print(f"로그인: {bot.user} (id={bot.user.id})")
     try:
-        # 1) 전역 동기화
-        global_synced = await bot.tree.sync()
-        print("전역 동기화:", len(global_synced))
-
-        # 2) 길드 동기화
-        guild = discord.Object(id=GUILD_ID)
-        guild_synced = await bot.tree.sync(guild=guild)
-        print("길드 동기화:", len(guild_synced))
-
+        # 특정 길드에만 등록하고 싶으면 GUILD_ID 사용
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+            print(f"슬래시 명령 동기화 완료 (guild={GUILD_ID})")
+        else:
+            # 전체 글로벌 커맨드 동기화
+            await bot.tree.sync()
+            print("글로벌 슬래시 명령 동기화 완료")
     except Exception as e:
-        print("동기화 에러:", e)
-    print("로그인:", bot.user)
-    
+        print(f"슬래시 명령 동기화 실패: {e}")
+
 if __name__ == "__main__":
     bot.run(TOKEN)

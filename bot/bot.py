@@ -1455,22 +1455,12 @@ async def before_rank_log_task():
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    try:
-        guild = discord.Object(id=GUILD_ID)
+    print("GUILD_ID:", GUILD_ID)
+    print("Logged in as", bot.user)
 
-        # 🔥 전역 + 길드 전부 삭제
-        bot.tree.clear_commands(guild=None)
-        bot.tree.clear_commands(guild=guild)
-
-        await bot.tree.sync(guild=None)
-        await bot.tree.sync(guild=guild)
-
-        print("전체 커맨드 강제 초기화 완료")
-
-    except Exception as e:
-        print("동기화 실패:", e)
-
-    print(f"Logged in as {bot.user}")
+    guild = discord.Object(id=GUILD_ID)
+    synced = await bot.tree.sync(guild=guild)
+    print("동기화된 개수:", len(synced))
         
 if __name__ == "__main__":
     bot.run(TOKEN)

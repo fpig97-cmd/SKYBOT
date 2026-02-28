@@ -498,6 +498,25 @@ class VerifyView(discord.ui.View):
     
 # ---------- 슬래시 명령어 ----------
 
+@bot.tree.command(name="명령어삭제", description="전체 슬래시 명령어 삭제 (제작자만)")
+async def delete_commands(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send("제작자만 사용 가능", ephemeral=True)
+        return
+    
+    # 글로벌 명령어 삭제
+    global_commands = await bot.tree.fetch_commands()
+    for cmd in global_commands:
+        await cmd.delete()
+    
+    # 길드 명령어 삭제 (현재 서버)
+    guild_commands = await bot.tree.fetch_commands(guild=interaction.guild)
+    for cmd in guild_commands:
+        await cmd.delete()
+    
+    await interaction.response.send("✅ 모든 슬래시 명령어 삭제 완료. 봇 재시작 후 sync하세요!", ephemeral=True)
+
+
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):

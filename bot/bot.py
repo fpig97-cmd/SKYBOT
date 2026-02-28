@@ -435,11 +435,10 @@ class VerifyView(discord.ui.View):
                         "서버에서 유저 정보를 찾을 수 없습니다.", ephemeral=True
                     )
                 return
-
             # 역할 부여
             await member.add_roles(role)
-
-            # 닉네임 변경 (원래 네 코드 그대로, headers만 정확히)
+                
+            # 닉네임 변경
             try:
                 resp = requests.post(
                     f"{RANK_API_URL_ROOT}/bulk-status",
@@ -447,33 +446,31 @@ class VerifyView(discord.ui.View):
                     headers=_rank_api_headers(),
                     timeout=15,
                 )
-                
-                
-             if resp.status_code == 200:
-            data = resp.json()
-            results = data.get("results", [])
-            if results and results[0].get("success"):
-                role_info = results[0].get("role", {})
-                rank_name = role_info.get("name", "?")
-            else:
-                rank_name = "?"
-            else:
-        rank_name = "?"
 
-        # 여기서 ROKA | 육군 → 육군 으로 정제
-        if " | " in rank_name:
-            rank_name = rank_name.split(" | ")[-1]
+                if resp.status_code == 200:
+                    data = resp.json()
+                    results = data.get("results", [])
+                    if results and results[0].get("success"):
+                        role_info = results[0].get("role", {}) or {}
+                        rank_name = role_info.get("name", "?")
+                    else:
+                        rank_name = "?"
+                else:
+                    rank_name = "?"
 
-        new_nick = f"[{rank_name}] {nick}"
+                # 여기서 ROKA | 육군 → 육군 으로 정제
+                if " | " in rank_name:
+                    rank_name = rank_name.split(" | ")[-1]
 
-        if len(new_nick) > 32:
-            new_nick = new_nick[:32]
+                new_nick = f"[{rank_name}] {nick}"
+                if len(new_nick) > 32:
+                    new_nick = new_nick[:32]
 
-        await member.edit(nick=new_nick)
-        
+                await member.edit(nick=new_nick)
             except Exception as e:
                 print(f"닉네임 변경 실패: {e}")
                 # 실패해도 인증은 완료
+
 
             cursor.execute(
                 "UPDATE users SET verified=1 WHERE discord_id=? AND guild_id=?",

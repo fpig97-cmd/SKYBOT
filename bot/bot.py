@@ -1503,20 +1503,13 @@ async def before_rank_log_task():
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    print(f"로그인: {bot.user} (id={bot.user.id})")
-    try:
-        # 특정 길드에만 등록하고 싶으면 GUILD_ID 사용
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            print(f"슬래시 명령 동기화 완료 (guild={GUILD_ID})")
-        else:
-            # 전체 글로벌 커맨드 동기화
-            await bot.tree.sync()
-            print("글로벌 슬래시 명령 동기화 완료")
-    except Exception as e:
-        print(f"슬래시 명령 동기화 실패: {e}")
-
+    print(f'{bot.user} 로그인')
+    if GUILD_ID:  # .env에 서버 ID 넣음
+        guild = discord.Object(id=GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)  # 길드만 sync
+    else:
+        await bot.tree.sync()  # 전역만
+        
 if __name__ == "__main__":
     bot.run(TOKEN)

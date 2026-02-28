@@ -583,6 +583,57 @@ async def configure(interaction: discord.Interaction, 역할: discord.Role):
         f"인증 역할을 {역할.mention}로 설정했습니다.", ephemeral=True
     )
 
+@bot.tree.command(name="역할전체", description="서버 역할과 봇 역할을 10개씩 출력합니다.")
+async def role_all(interaction: discord.Interaction):
+
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("관리자만 사용 가능합니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    # ---------- 1️⃣ 서버 전체 역할 ----------
+    roles = interaction.guild.roles[::-1]
+    roles = [r for r in roles if r.name != "@everyone"]
+
+    if roles:
+        chunks = [roles[i:i+10] for i in range(0, len(roles), 10)]
+
+        for idx, chunk in enumerate(chunks, start=1):
+            embed = discord.Embed(
+                title=f"서버 역할 목록 (총 {len(roles)}개) ({idx}/{len(chunks)})",
+                color=discord.Color.blue()
+            )
+
+            desc = ""
+            for role in chunk:
+                desc += f"{role.mention} | `{role.id}`\n"
+
+            embed.description = desc
+            await interaction.followup.send(embed=embed)
+
+    # ---------- 2️⃣ 봇 역할 ----------
+    bot_member = interaction.guild.get_member(bot.user.id)
+    bot_roles = bot_member.roles[::-1]
+    bot_roles = [r for r in bot_roles if r.name != "@everyone"]
+
+    if bot_roles:
+        chunks = [bot_roles[i:i+10] for i in range(0, len(bot_roles), 10)]
+
+        for idx, chunk in enumerate(chunks, start=1):
+            embed = discord.Embed(
+                title=f"봇 역할 목록 (총 {len(bot_roles)}개) ({idx}/{len(chunks)})",
+                color=discord.Color.green()
+            )
+
+            desc = ""
+            for role in chunk:
+                desc += f"{role.mention} | `{role.id}`\n"
+
+            embed.description = desc
+            await interaction.followup.send(embed=embed)
+    else:
+        await interaction.followup.send("봇은 역할이 없습니다.")
 
 @bot.tree.command(name="관리자지정", description="관리자 역할 추가/제거 (개발자 전용)")
 @app_commands.describe(

@@ -24,6 +24,9 @@ intents.members = True
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # ← 이 줄은 그대로 두고,
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
+LOG_DIR = os.environ.get("LOG_DIR", "/app/logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)
 
@@ -196,8 +199,7 @@ def check_is_officer(rank_num: int, rank_name: str) -> tuple[bool, bool]:
 
 def save_verification_log(discord_nick: str, roblox_nick: str):
     """인증 성공 시 로그 파일에 기록"""
-    # 루트 폴더(C:\SKYBOT)의 verification_log.txt 한 개만 사용
-    log_file = os.path.join(PROJECT_ROOT, "verification_log.txt")
+    log_file = os.path.join(LOG_DIR, "verification_log.txt")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     try:
@@ -205,12 +207,6 @@ def save_verification_log(discord_nick: str, roblox_nick: str):
             f.write(f"[{timestamp}] [{discord_nick}]: [{roblox_nick}]\n")
     except Exception as e:
         print(f"로그 저장 실패: {e}")
-
-def get_guild_group_id(guild_id: int) -> Optional[int]:
-    cursor.execute("SELECT group_id FROM group_settings WHERE guild_id=?", (guild_id,))
-    row = cursor.fetchone()
-    return row[0] if row else None
-
 
 def set_guild_group_id(guild_id: int, group_id: int) -> None:
     cursor.execute(
@@ -1241,7 +1237,7 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
         return
 
     await interaction.response.defer(ephemeral=True)
-
+    
     user_id = await roblox_get_user_id_by_username(roblox_nick)
     if not user_id:
         await interaction.followup.send(

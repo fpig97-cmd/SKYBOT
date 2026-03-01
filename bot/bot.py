@@ -18,9 +18,17 @@ import requests
 
 # ---------- 기본 설정 ----------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+intents = discord.Intents.default()
+intents.members = True
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # ← 이 줄은 그대로 두고,
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)
+
+OFFICER_ROLE_ID = 1477313558474920057
+TARGET_ROLE_ID = 1461636782176075831
 
 TOKEN = str(os.getenv("DISCORD_TOKEN"))
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
@@ -54,6 +62,14 @@ cursor.execute(
         guild_id INTEGER,
         log_data TEXT,
         created_at TEXT
+    )"""
+)
+conn.commit()
+
+cursor.execute(
+    """CREATE TABLE IF NOT EXISTS senior_officer_settings(
+        guild_id INTEGER PRIMARY KEY,
+        senior_officer_role_id INTEGER
     )"""
 )
 conn.commit()
@@ -120,6 +136,14 @@ cursor.execute(
 )
 
 cursor.execute(
+    """CREATE TABLE IF NOT EXISTS officer_settings(
+        guild_id INTEGER PRIMARY KEY,
+        officer_role_id INTEGER
+    )"""
+)
+conn.commit()
+
+cursor.execute(
     """CREATE TABLE IF NOT EXISTS group_settings(
         guild_id INTEGER PRIMARY KEY,
         group_id INTEGER
@@ -137,6 +161,50 @@ conn.commit()
 conn.commit()
 
 # ---------- 설정/권한 유틸 ----------
+
+def get_senior_officer_role_id(guild_id: int) -> Optional[int]:
+    cursor.execute("SELECT senior_officer_role_id FROM senior_officer_settings WHERE guild_id=?", (guild_id,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def set_senior_officer_role_id(guild_id: int, role_id: int) -> None:
+    cursor.execute(
+        """INSERT OR REPLACE INTO senior_officer_settings(guild_id, senior_officer_role_id)
+           VALUES(?, ?)""",
+        (guild_id, role_id),
+    )
+    conn.commit()
+
+def check_is_officer(rank_num: int, rank_name: str) -> tuple[bool, bool]:
+    """위관급, 영관급 여부 체크 - (is_junior_officer, is_senior_officer)"""
+    # 위관급: 소위(20) ~ 중령(80)
+    is_junior = 70 <= rank_num <= 120
+    junior_keywords = ["Second Lieutenant", "First Lieutenant", "Captain", "Major", "Lieutenant Colonel", "소위", "중위", "대위", "소령", "중령"]
+    if any(kw.lower() in rank_name.lower() for kw in junior_keywords):
+        is_junior = True
+    
+    # 영관급 이상: 대령(100) ~ 대장(200) + 장성급 포함
+    is_senior = 130 <= rank_num <= 170
+    senior_keywords = [
+        "Colonel", "Brigadier General", "Major General", "Lieutenant General", "General", 
+        "대령", "준장", "소장", "중장", "대장", "원수"
+    ]
+    if any(kw.lower() in rank_name.lower() for kw in senior_keywords):
+        is_senior = True
+    
+    return (is_junior, is_senior)
+
+def save_verification_log(discord_nick: str, roblox_nick: str):
+    """인증 성공 시 로그 파일에 기록"""
+    # 루트 폴더(C:\SKYBOT)의 verification_log.txt 한 개만 사용
+    log_file = os.path.join(PROJECT_ROOT, "verification_log.txt")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] [{discord_nick}]: [{roblox_nick}]\n")
+    except Exception as e:
+        print(f"로그 저장 실패: {e}")
 
 def get_guild_group_id(guild_id: int) -> Optional[int]:
     cursor.execute("SELECT group_id FROM group_settings WHERE guild_id=?", (guild_id,))
@@ -319,6 +387,20 @@ async def roblox_get_description_by_user_id(user_id: int) -> Optional[str]:
         except Exception as e:
             add_error_log(f"roblox_get_description: {repr(e)}")
             return None
+        
+def get_officer_role_id(guild_id: int) -> Optional[int]:
+    cursor.execute("SELECT officer_role_id FROM officer_settings WHERE guild_id=?", (guild_id,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def set_officer_role_id(guild_id: int, role_id: int) -> None:
+    cursor.execute(
+        """INSERT OR REPLACE INTO officer_settings(guild_id, officer_role_id)
+           VALUES(?, ?)""",
+        (guild_id, role_id),
+    )
+    conn.commit()
+
 
 # ---------- 인증 View ----------
 
@@ -486,6 +568,14 @@ class VerifyView(discord.ui.View):
             )
             conn.commit()
 
+            # 인증 완료 후 로그 기록
+            try:
+                discord_nick = member.name  # Discord 사용자 이름
+                save_verification_log(discord_nick, nick)
+            except Exception as e:
+                print(f"로그 기록 실패: {e}")
+
+
             if not interaction.response.is_done():
                 await interaction.response.send_message("인증 완료!", ephemeral=True)
 
@@ -601,7 +691,7 @@ async def configure(interaction: discord.Interaction, 역할: discord.Role):
         f"인증 역할을 {역할.mention}로 설정했습니다.", ephemeral=True
     )
 
-@bot.tree.command(name="역할전체", description="서버 역할과 봇 역할을 10개씩 출력합니다.")
+@bot.tree.command(name="역할목록", description="서버 역할과 봇 역할을 10개씩 출력합니다.(관리자)")
 async def role_all(interaction: discord.Interaction):
 
     if not is_admin(interaction.user):
@@ -619,7 +709,7 @@ async def role_all(interaction: discord.Interaction):
 
         for idx, chunk in enumerate(chunks, start=1):
             embed = discord.Embed(
-                title=f"📋 서버 역할 목록 (총 {len(roles)}개) ({idx}/{len(chunks)})",
+                title=f"서버 역할 목록 (총 {len(roles)}개) ({idx}/{len(chunks)})",
                 color=discord.Color.blue()
             )
 
@@ -640,7 +730,7 @@ async def role_all(interaction: discord.Interaction):
 
         for idx, chunk in enumerate(chunks, start=1):
             embed = discord.Embed(
-                title=f"🤖 봇 역할 목록 (총 {len(bot_roles)}개) ({idx}/{len(chunks)})",
+                title=f"봇 역할 목록 (총 {len(bot_roles)}개) ({idx}/{len(chunks)})",
                 color=discord.Color.green()
             )
 
@@ -1143,7 +1233,7 @@ async def sync_commands(interaction: discord.Interaction):
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(
     user="Discord 유저 멘션",
-    roblox_nick="Roblox 본닉"
+    roblox_nick="Roblox 닉네임"
 )
 async def force_verify(interaction: discord.Interaction, user: discord.User, roblox_nick: str):
     if not is_admin(interaction.user):
@@ -1152,7 +1242,6 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
 
     await interaction.response.defer(ephemeral=True)
 
-    # Roblox 유저 ID 가져오기
     user_id = await roblox_get_user_id_by_username(roblox_nick)
     if not user_id:
         await interaction.followup.send(
@@ -1161,7 +1250,7 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
         )
         return
 
-    # users 테이블에 verified=1로 직접 저장 (인증 처리)
+    # users 테이블에 verified=1로 저장
     cursor.execute(
         """INSERT OR REPLACE INTO users(discord_id, guild_id, roblox_nick, roblox_user_id, code, expire_time, verified)
            VALUES(?, ?, ?, ?, ?, ?, 1)""",
@@ -1169,23 +1258,108 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
     )
     conn.commit()
 
+    # 강제인증 로그 기록
+    try:
+        save_verification_log(user.name, roblox_nick)
+    except:
+        pass
+
     # 인증 역할 부여
     role_id = get_guild_role_id(interaction.guild.id)
-    if role_id:
+    member = interaction.guild.get_member(user.id)
+    
+    if role_id and member:
         role = interaction.guild.get_role(role_id)
-        member = interaction.guild.get_member(user.id)
-        if member and role:
+        if role:
             try:
                 await member.add_roles(role)
             except:
                 pass
 
+    # 현재 랭크 조회 및 닉네임 변경
+    try:
+        resp = requests.post(
+            f"{RANK_API_URL_ROOT}/bulk-status",
+            json={"usernames": [roblox_nick]},
+            headers=_rank_api_headers(),
+            timeout=15,
+        )
+        
+        rank_name = "?"
+        rank_num = 0
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            if results and results[0].get("success"):
+                role_info = results[0].get("role", {})
+                rank_name = role_info.get("name", "?")
+                rank_num = role_info.get("rank", 0)
+        
+        # Discord 닉네임 변경
+        new_nick = f"[{rank_name}] {roblox_nick}"
+        if len(new_nick) > 32:
+            new_nick = new_nick[:32]
+        
+        if member:
+            await member.edit(nick=new_nick)
+        
+        # 위관급/영관급 역할 부여
+        is_junior, is_senior = check_is_officer(rank_num, rank_name)
+        
+        officer_role_id = get_officer_role_id(interaction.guild.id)
+        if officer_role_id and is_junior:
+            officer_role = interaction.guild.get_role(officer_role_id)
+            if officer_role and member:
+                await member.add_roles(officer_role)
+        
+        senior_officer_role_id = get_senior_officer_role_id(interaction.guild.id)
+        if senior_officer_role_id and is_senior:
+            senior_officer_role = interaction.guild.get_role(senior_officer_role_id)
+            if senior_officer_role and member:
+                await member.add_roles(senior_officer_role)
+        
+    except Exception as e:
+        print(f"강제인증 추가 처리 실패: {e}")
+
     embed = discord.Embed(
         title="강제인증 완료",
         color=discord.Color.green(),
-        description=f"{user.mention} 을(를) {roblox_nick}로 인증 처리했습니다."
+        description=f"{user.mention} 을(를) {roblox_nick}로 인증 처리했습니다.\nDiscord 닉: `{new_nick}`"
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="인증로그보기", description="인증 기록을 확인합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(최근="최근 N개 (기본 20)")
+async def view_verification_log(interaction: discord.Interaction, 최근: int = 20):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    log_file = os.path.join(BASE_DIR, "verification_log.txt")
+    
+    if not os.path.exists(log_file):
+        await interaction.response.send_message("인증 로그가 없습니다.", ephemeral=True)
+        return
+
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        
+        recent_lines = lines[-최근:]
+        msg = "".join(recent_lines) or "로그가 비어있습니다."
+        
+        embed = discord.Embed(
+            title="인증 로그",
+            description=f"```\n{msg[:1900]}\n```",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"최근 {len(recent_lines)}개 / 전체 {len(lines)}개")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        await interaction.response.send_message(f"로그 읽기 실패: {e}", ephemeral=True)
 
 @bot.tree.command(
     name="일괄닉네임변경",
@@ -1328,6 +1502,388 @@ async def view_blacklist(interaction: discord.Interaction):
         embed.description = "\n".join(group_ids)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="역할전체변경", description="모든 유저의 역할을 한 역할로 통일합니다. (위험)")
+async def set_all_role(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild.id != GUILD_ID:
+        await interaction.response.send_message("이 명령어는 지정된 서버에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    target_role = guild.get_role(TARGET_ROLE_ID)
+    if not target_role:
+        await interaction.response.send_message("대상 역할을 찾을 수 없습니다.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("모든 멤버 역할 변경 시작...", ephemeral=True)
+
+    success = 0
+    failed = 0
+    skipped = 0
+
+    for member in guild.members:
+        # 봇은 스킵
+        if member.bot:
+            continue
+
+        # 봇 위상보다 높은/같은 멤버는 어차피 못 건드리니 스킵[web:80]
+        if guild.me.top_role <= member.top_role:
+            skipped += 1
+            continue
+
+        try:
+            # @everyone 역할은 항상 첫 번째, 제거하면 안 됨[web:58]
+            everyone = member.roles[0]
+            new_roles = [everyone, target_role]
+
+            await member.edit(roles=new_roles)
+            success += 1
+
+            # 레이트리밋 완화용 (인원 많으면 조절)
+            await asyncio.sleep(0.3)
+
+        except discord.Forbidden:
+            # 권한 부족(역할 위상 등) → 그 멤버만 예외
+            print(f"{member} 권한 부족으로 스킵")
+            failed += 1
+        except Exception as e:
+            print(f"{member} 역할 변경 실패: {e}")
+            failed += 1
+
+    await interaction.followup.send(
+        f"역할 변경 완료\n"
+        f"성공: {success}명\n"
+        f"실패: {failed}명\n"
+        f"위상/조건으로 스킵: {skipped}명",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="장교역할", description="장교 (영관급 ~ 장성급) 에게 부여할 역할을 설정합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(role="영관급 장교 역할")
+async def set_senior_officer_role(interaction: discord.Interaction, role: discord.Role):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    if interaction.guild.me.top_role <= role:
+        await interaction.response.send_message(
+            "봇의 최상위 역할보다 위의 역할은 설정할 수 없습니다.", ephemeral=True
+        )
+        return
+
+    set_senior_officer_role_id(interaction.guild.id, role.id)
+    
+    await interaction.response.send_message(
+        f"장교 역할을 {role.mention}으로 설정했습니다.",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="업데이트", description="유저의 Discord 닉네임을 변경합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    user="디스코드 유저 멘션",
+    roblox_nick="로블록스 닉네임",
+)
+async def update_user(
+    interaction: discord.Interaction,
+    user: discord.User,
+    roblox_nick: str
+):
+    # 관리자 체크
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # 1. 새로운 Roblox 유저 ID 확인
+    new_user_id = await roblox_get_user_id_by_username(roblox_nick)
+    if not new_user_id:
+        await interaction.followup.send(
+            f"해당 닉네임 ({roblox_nick}) 의 로블록스 계정을 찾을 수 없습니다.",
+            ephemeral=True
+        )
+        return
+
+    # 2. DB에서 기존 유저 정보 확인
+    cursor.execute(
+        "SELECT verified FROM users WHERE discord_id=? AND guild_id=?",
+        (user.id, interaction.guild.id),
+    )
+    data = cursor.fetchone()
+
+    if not data or data[0] == 0:
+        await interaction.followup.send(
+            f"{user.mention}은(는) 인증된 유저가 아닙니다. 먼저 인증해주세요.",
+            ephemeral=True
+        )
+        return
+
+    # 3. DB 업데이트 (roblox_nick, roblox_user_id)
+    cursor.execute(
+        """
+        UPDATE users 
+        SET roblox_nick = ?, roblox_user_id = ?
+        WHERE discord_id = ? AND guild_id = ?
+        """,
+        (roblox_nick, new_user_id, user.id, interaction.guild.id)
+    )
+    conn.commit()
+
+    # 4. 현재 Roblox 랭크 조회
+    try:
+        resp = requests.post(
+            f"{RANK_API_URL_ROOT}/bulk-status",
+            json={"usernames": [roblox_nick]},
+            headers=_rank_api_headers(),
+            timeout=15,
+        )
+
+        rank_name = "?"
+        rank_num = 0
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            if results and results[0].get("success"):
+                role_info = results[0].get("role", {})
+                rank_name = role_info.get("name", "?")
+    except Exception as e:
+        print(f"랭크 조회 실패: {e}")
+        rank_name = "?"
+
+    # 5. Discord 닉네임 변경: [랭크] 만 사용 (로블닉 제외)
+    member = interaction.guild.get_member(user.id)
+    if member:
+        try:
+            new_nick = f"[{rank_name}]"
+
+            # 닉네임 길이 제한 (32자)
+            if len(new_nick) > 32:
+                new_nick = new_nick[:32]
+
+            await member.edit(nick=new_nick)
+        except Exception as e:
+            print(f"닉네임 변경 실패: {e}")
+
+            # 위관급/영관급 역할 즉시 부여
+        is_junior, is_senior = check_is_officer(rank_num, rank_name)
+
+        officer_role_id = get_officer_role_id(interaction.guild.id)
+        if officer_role_id:
+            officer_role = interaction.guild.get_role(officer_role_id)
+            if officer_role and member:
+                try:
+                    if is_junior and officer_role not in member.roles:
+                        await member.add_roles(officer_role)
+                    elif not is_junior and officer_role in member.roles:
+                        await member.remove_roles(officer_role)
+                except:
+                    pass
+
+        senior_officer_role_id = get_senior_officer_role_id(interaction.guild.id)
+        if senior_officer_role_id:
+            senior_officer_role = interaction.guild.get_role(senior_officer_role_id)
+            if senior_officer_role and member:
+                try:
+                    if is_senior and senior_officer_role not in member.roles:
+                        await member.add_roles(senior_officer_role)
+                    elif not is_senior and senior_officer_role in member.roles:
+                        await member.remove_roles(senior_officer_role)
+                except:
+                    pass
+
+
+    # 6. 결과 응답
+    embed = discord.Embed(
+        title="유저 정보 업데이트 완료",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="유저", value=user.mention, inline=True)
+    embed.add_field(name="새 Discord 닉네임", value=f"[{rank_name}]", inline=True)
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+    
+@tasks.loop(hours=6)
+async def sync_all_nicknames_task():
+    """6시간마다 전체 유저의 Roblox 정보를 동기화하고 닉네임 업데이트"""
+    try:
+        cursor.execute("SELECT guild_id FROM rank_log_settings WHERE enabled=1")
+        settings = cursor.fetchall()
+
+        for (guild_id,) in settings:
+            guild = bot.get_guild(guild_id)
+            if not guild:
+                continue
+
+            # 인증된 모든 유저 조회
+            cursor.execute(
+                "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+                (guild_id,),
+            )
+            users = cursor.fetchall()
+
+            if not users:
+                continue
+
+            usernames = [u[1] for u in users]
+            
+            # 배치 처리 (100명씩)
+            BATCH_SIZE = 100
+            for i in range(0, len(usernames), BATCH_SIZE):
+                batch = usernames[i:i + BATCH_SIZE]
+                
+                try:
+                    # 현재 Roblox 정보 조회
+                    resp = requests.post(
+                        f"{RANK_API_URL_ROOT}/bulk-status",
+                        json={"usernames": batch},
+                        headers=_rank_api_headers(),
+                        timeout=30,
+                    )
+
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        
+                        for r in data.get("results", []):
+                            if r.get("success"):
+                                username = r['username']
+                                role_info = r.get("role", {})
+                                rank_name = role_info.get("name", "?")
+                                
+                                # Discord 닉네임 업데이트
+                                for discord_id, roblox_nick in users:
+                                    if roblox_nick == username:
+                                        member = guild.get_member(discord_id)
+                                        if member:
+                                            try:
+                                                new_nick = f"[{rank_name}] {username}"
+                                                if len(new_nick) > 32:
+                                                    new_nick = new_nick[:32]
+                                                
+                                                # 닉네임이 다를 때만 변경
+                                                if member.nick != new_nick:
+                                                    await member.edit(nick=new_nick)
+                                            except Exception as e:
+                                                print(f"닉네임 변경 실패 {username}: {e}")
+                                        break
+                    
+                    # Rate limit 방지
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    print(f"Batch {i} sync error: {e}")
+                    continue
+
+        print(f"[{datetime.now()}] 전체 닉네임 동기화 완료")
+        
+    except Exception as e:
+        print(f"sync_all_nicknames_task error: {e}")
+
+
+@sync_all_nicknames_task.before_loop
+async def before_sync_all_nicknames_task():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=5)
+async def officer_role_sync_task():
+    """5분마다 인증된 유저의 랭크를 체크하여 위관급 장교 역할 자동 부여/해제"""
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if not guild:
+            return
+
+        officer_role = guild.get_role(OFFICER_ROLE_ID)
+        if not officer_role:
+            return
+
+        # 인증된 모든 유저 조회
+        cursor.execute(
+            "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+            (GUILD_ID,),
+        )
+        users = cursor.fetchall()
+        if not users:
+            return
+
+        usernames = [u[1] for u in users]
+
+        BATCH_SIZE = 100
+        for i in range(0, len(usernames), BATCH_SIZE):
+            batch = usernames[i:i + BATCH_SIZE]
+
+            try:
+                # 현재 Roblox 랭크 일괄 조회
+                resp = requests.post(
+                    f"{RANK_API_URL_ROOT}/bulk-status",
+                    json={"usernames": batch},
+                    headers=_rank_api_headers(),
+                    timeout=30,
+                )
+
+                if resp.status_code == 200:
+                    data = resp.json()
+
+                    # username -> rank 정보 매핑
+                    rank_map = {}
+                    for r in data.get("results", []):
+                        if r.get("success"):
+                            role_info = r.get("role", {})
+                            rank_map[r["username"]] = {
+                                "name": role_info.get("name", ""),
+                                "rank": role_info.get("rank", 0),
+                            }
+
+                    # 각 유저의 역할 부여/해제
+                    for discord_id, roblox_nick in users:
+                        if roblox_nick not in rank_map:
+                            continue
+
+                        member = guild.get_member(discord_id)
+                        if not member:
+                            continue
+
+                        info = rank_map[roblox_nick]
+                        rank_name = info["name"]
+                        rank_num = info["rank"]
+
+                        # 위관급 판정 (예: 80~120)
+                        is_officer = 80 <= rank_num <= 120
+
+                        # 이름으로도 판정 (한글/영문 모두)
+                        officer_keywords = [
+                            "Second Lieutenant", "First Lieutenant", "Captain",
+                            "Major", "Lieutenant Colonel",
+                            "소위", "중위", "대위", "소령", "중령",
+                        ]
+                        if any(kw.lower() in rank_name.lower() for kw in officer_keywords):
+                            is_officer = True
+
+                        # 역할 부여/해제
+                        try:
+                            if is_officer and officer_role not in member.roles:
+                                await member.add_roles(officer_role)
+                                print(f"[{guild.name}] {member} 위관급 역할 부여")
+                            elif not is_officer and officer_role in member.roles:
+                                await member.remove_roles(officer_role)
+                                print(f"[{guild.name}] {member} 위관급 역할 해제")
+                        except Exception as e:
+                            print(f"역할 변경 실패 {member}: {e}")
+
+                # Rate limit 방지
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                print(f"Batch {i} officer sync error: {e}")
+                continue
+
+    except Exception as e:
+        print(f"officer_role_sync_task error: {e}")
+
+
+@officer_role_sync_task.before_loop
+async def before_officer_role_sync_task():
+    await bot.wait_until_ready()
 
 @tasks.loop(seconds=5)
 async def rank_log_task():
@@ -1503,20 +2059,30 @@ async def before_rank_log_task():
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():
-    print(f"로그인: {bot.user} (id={bot.user.id})")
+
     try:
-        # 특정 길드에만 등록하고 싶으면 GUILD_ID 사용
-        if GUILD_ID:
+        # GUILD_ID 서버 먼저 동기화
+        if GUILD_ID > 0:
             guild = discord.Object(id=GUILD_ID)
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-            print(f"슬래시 명령 동기화 완료 (guild={GUILD_ID})")
-        else:
-            # 전체 글로벌 커맨드 동기화
-            await bot.tree.sync()
-            print("글로벌 슬래시 명령 동기화 완료")
+            synced_guild = await bot.tree.sync(guild=guild)
+            print(f"Synced {len(synced_guild)} commands to guild {GUILD_ID} (즉시 적용)")
+        
+        # 전역 동기화
+        synced_global = await bot.tree.sync()
+        print(f"Synced {len(synced_global)} commands globally (15분 후 적용)")
+        
     except Exception as e:
-        print(f"슬래시 명령 동기화 실패: {e}")
+        print("동기화 실패:", e)
+    
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    # 태스크 시작
+    if not rank_log_task.is_running():
+        rank_log_task.start()
+    
+    # ✅ 새로운 태스크 시작
+    if not sync_all_nicknames_task.is_running():
+        sync_all_nicknames_task.start()
 
 if __name__ == "__main__":
     bot.run(TOKEN)

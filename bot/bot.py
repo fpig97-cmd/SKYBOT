@@ -32,49 +32,11 @@ def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str) -> No
         # 웹 죽어 있어도 봇은 멈추면 안 되니까 조용히 무시
         pass
 
-
-# ---------- Postgres 테이블 생성 ----------
-
-pg_cur.execute("""
-CREATE TABLE IF NOT EXISTS users(
-    discord_id     BIGINT,
-    guild_id       BIGINT,
-    roblox_nick    TEXT,
-    roblox_user_id BIGINT,
-    code           TEXT,
-    expire_time    TIMESTAMPTZ,
-    verified       INTEGER DEFAULT 0,
-    PRIMARY KEY(discord_id, guild_id)
-)
-""")
-
-pg_cur.execute("""
-CREATE TABLE IF NOT EXISTS stats(
-    guild_id     BIGINT PRIMARY KEY,
-    verify_count INTEGER DEFAULT 0,
-    force_count  INTEGER DEFAULT 0,
-    cancel_count INTEGER DEFAULT 0
-)
-""")
-
-pg_cur.execute("""
-CREATE TABLE IF NOT EXISTS blacklist(
-    guild_id BIGINT,
-    group_id BIGINT,
-    PRIMARY KEY(guild_id, group_id)
-)
-""")
-
-# ---------- 기본 설정 ----------
-
 intents = discord.Intents.default()
 intents.members = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # ← 이 줄은 그대로 두고,
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
-
-LOG_DIR = os.environ.get("LOG_DIR", "/app/logs")
-os.makedirs(LOG_DIR, exist_ok=True)
 
 env_path = os.path.join(BASE_DIR, ".env")
 load_dotenv(env_path)

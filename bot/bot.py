@@ -554,7 +554,7 @@ class VerifyView(discord.ui.View):
 
             # DB에서 verified=1 로 표시
             cursor.execute(
-                "UPDATE users SET verified=1 WHERE discord_id=? AND guildid=?",
+                "UPDATE users SET verified=1 WHERE discord_id=? AND guild_id=?",
                 (interaction.user.id, self.guild_id),
             )
 

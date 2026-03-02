@@ -416,10 +416,9 @@ class VerifyView(discord.ui.View):
 
 # ---------- View 클래스 ----------
 def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str):
-    """웹 API로 인증 로그 전송."""
     try:
         resp = requests.post(
-            "https://web-api-production-69fc.up.railway.app/api/logs/verify",
+            "https://web-api-production-69fc.up.railway.app/api/log",  # ← /api/log 로 변경
             json={
                 "guild_id": guild_id,
                 "user_id": user_id,

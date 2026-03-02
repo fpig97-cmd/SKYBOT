@@ -1,39 +1,729 @@
-import os
-import asyncio
-import re
-import json
-import sqlite3
-import random
-import string
-from datetime import datetime, timedelta, timezone
-from typing import Optional 
+import os import asyncio import re import json import sqlite3 import
 
-import aiohttp
-import discord
-from discord import app_commands
-from discord.ext import tasks
-from discord.ext import commands
-from dotenv import load_dotenv
-import requests
-from datetime import datetime
-from enum import Enum 
+random import string from datetime import datetime, timedelta, timezone
 
-API_BASE = "https://web-api-production-69fc.up.railway.app" 
+from typing import Optional
 
-def is_already_verified(guild_id: int, user_id: int) -> bool:
-    try:
-        resp = requests.get(
-            f"{API_BASE}/api/logs/verify",
-            params={
-                "guild_id": guild_id,
-                "user_id": user_id,
-                "limit": 1,
-            },
-            timeout=5,
-        )
-        if resp.status_code != 200:
-            print("[WEB_CHECK_ERROR]", resp.status_code, resp.text)
-            return False 
+
+import aiohttp import discord from discord import app_commands from
+
+discord.ext import tasks from discord.ext import commands from dotenv
+
+import load_dotenv import requests from datetime import datetime from
+
+enum import Enum
+
+
+API_BASE = “https://web-api-production-69fc.up.railway.app”
+
+
+def is_already_verified(guild_id: int, user_id: int) -> bool: try: resp
+
+= requests.get( f”{API_BASE}/api/logs/verify”, params={ “guild_id”:
+
+guild_id, “user_id”: user_id, “limit”: 1, }, timeout=5, ) if
+
+resp.status_code != 200: print(“[WEB_CHECK_ERROR]”, resp.status_code,
+
+resp.text) return False
+
+
+        data = resp.json()
+
+        # 한 건이라도 있으면 이미 인증한 걸로 간주
+
+        return len(data) > 0
+
+    except Exception as e:
+
+        print("[WEB_CHECK_EXCEPTION]", repr(e))
+
+        return False
+
+
+LOG_API_URL = “https://web-api-production-69fc.up.railway.app” # 나중에
+
+Railway 올리면 URL만 바꾸면 됨
+
+
+intents = discord.Intents.default() intents.members = True
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(file)) # ← 이 줄은 그대로
+
+두고, PROJECT_ROOT = os.path.dirname(BASE_DIR)
+
+
+env_path = os.path.join(BASE_DIR, “.env”) load_dotenv(env_path)
+
+
+OFFICER_ROLE_ID = 1477313558474920057 TARGET_ROLE_ID =
+
+1461636782176075831
+
+
+TOKEN = str(os.getenv(“DISCORD_TOKEN”)) GUILD_ID =
+
+int(os.getenv(“GUILD_ID”, “0”)) OWNER_ID = int(os.getenv(“OWNER_ID”,
+
+“0”))
+
+
+RANK_API_URL_ROOT =
+
+“https://surprising-perfection-production-e015.up.railway.app”
+
+print(“DEBUG ROOT:”, repr(RANK_API_URL_ROOT)) RANK_API_KEY =
+
+os.getenv(“RANK_API_KEY”)
+
+
+CREATOR_ROBLOX_NICK = “Sky_Lunarx” CREATOR_ROBLOX_REAL = “Sky_Lunarx”
+
+CREATOR_DISCORD_NAME = “Lunar”
+
+
+if not TOKEN: raise RuntimeError(“DISCORD_TOKEN이 .env에 설정되어 있지
+
+않습니다.”)
+
+
+intents = discord.Intents.all() bot = commands.Bot(command_prefix=“!”,
+
+intents=intents)
+
+
+error_logs: list[dict] = [] MAX_LOGS = 50
+
+
+DB_PATH = os.path.join(BASE_DIR, “bot.db”) conn =
+
+sqlite3.connect(DB_PATH, check_same_thread=False) cursor = conn.cursor()
+
+
+———- DB 스키마 ———-
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS rank_log_history( id
+
+INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, log_data TEXT,
+
+created_at TEXT )”“” ) conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS senior_officer_settings(
+
+guild_id INTEGER PRIMARY KEY, senior_officer_role_id INTEGER )”“” )
+
+conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS blacklist( guild_id
+
+INTEGER, group_id INTEGER, PRIMARY KEY(guild_id, group_id) )”“” )
+
+conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS rank_log_settings(
+
+guild_id INTEGER PRIMARY KEY, channel_id INTEGER, enabled INTEGER
+
+DEFAULT 0 )”“” ) conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS forced_verified(
+
+discord_id INTEGER, guild_id INTEGER, roblox_nick TEXT, roblox_user_id
+
+INTEGER, rank_role TEXT, PRIMARY KEY(discord_id, guild_id) )”“” )
+
+conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS users( discord_id INTEGER,
+
+guild_id INTEGER, roblox_nick TEXT, roblox_user_id INTEGER, code TEXT,
+
+expire_time TEXT, verified INTEGER DEFAULT 0, PRIMARY KEY(discord_id,
+
+guild_id) )”“” )
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS stats( guild_id INTEGER
+
+PRIMARY KEY, verify_count INTEGER DEFAULT 0, force_count INTEGER DEFAULT
+
+0, cancel_count INTEGER DEFAULT 0 )”“” )
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS settings( guild_id INTEGER
+
+PRIMARY KEY, role_id INTEGER, status_channel_id INTEGER, admin_role_id
+
+TEXT )”“” )
+
+
+cursor.execute(““” CREATE TABLE IF NOT EXISTS logchannels ( guildid
+
+INTEGER, logtype TEXT, channelid INTEGER, PRIMARY KEY (guildid, logtype)
+
+) “““) conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS officer_settings( guild_id
+
+INTEGER PRIMARY KEY, officer_role_id INTEGER )”“” ) conn.commit()
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS group_settings( guild_id
+
+INTEGER PRIMARY KEY, group_id INTEGER )”“” )
+
+
+cursor.execute( “““CREATE TABLE IF NOT EXISTS rollback_settings(
+
+guild_id INTEGER PRIMARY KEY, auto_rollback INTEGER DEFAULT 1 )”“” )
+
+conn.commit()
+
+
+conn.commit()
+
+
+———- 설정/권한 유틸 ———-
+
+
+def get_senior_officer_role_id(guild_id: int) -> Optional[int]:
+
+cursor.execute(“SELECT senior_officer_role_id FROM
+
+senior_officer_settings WHERE guild_id=?”, (guild_id,)) row =
+
+cursor.fetchone() return row[0] if row else None
+
+
+def set_senior_officer_role_id(guild_id: int, role_id: int) -> None:
+
+cursor.execute( “““INSERT OR REPLACE INTO
+
+senior_officer_settings(guild_id, senior_officer_role_id) VALUES(?,
+
+?)”““, (guild_id, role_id), ) conn.commit()
+
+
+def check_is_officer(rank_num: int, rank_name: str) -> tuple[bool,
+
+bool]: “““위관급, 영관급 여부 체크 - (is_junior_officer,
+
+is_senior_officer)”“” # 위관급: 소위(20) ~ 중령(80) is_junior = 70 <=
+
+rank_num <= 120 junior_keywords = [“Second Lieutenant”, “First
+
+Lieutenant”, “Captain”, “Major”, “Lieutenant Colonel”, “소위”, “중위”,
+
+“대위”, “소령”, “중령”] if any(kw.lower() in rank_name.lower() for kw in
+
+junior_keywords): is_junior = True
+
+
+    # 영관급 이상: 대령(100) ~ 대장(200) + 장성급 포함
+
+    is_senior = 130 <= rank_num <= 170
+
+    senior_keywords = [
+
+        "Colonel", "Brigadier General", "Major General", "Lieutenant General", "General", 
+
+        "대령", "준장", "소장", "중장", "대장", "원수"
+
+    ]
+
+    if any(kw.lower() in rank_name.lower() for kw in senior_keywords):
+
+        is_senior = True
+
+
+    return (is_junior, is_senior) 
+
+
+LOG_DIR = os.environ.get(“LOG_DIR”, “/app/logs”) os.makedirs(LOG_DIR,
+
+exist_ok=True)
+
+
+def save_verification_log(discord_nick: str, roblox_nick: str): “““인증
+
+성공 시 로그 파일에 기록 + 콘솔에 같이 출력”“” log_file =
+
+os.path.join(LOG_DIR, “verification_log.txt”) timestamp =
+
+datetime.now().strftime(“%Y-%m-%d %H:%M:%S”) line = f”[{timestamp}]
+
+[{discord_nick}]: [{roblox_nick}]”
+
+
+    try:
+
+        # 파일에 저장 (Volume용)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+
+            f.write(line + "\n") 
+
+
+        # Deploy Logs 에도 출력
+
+        print("[VERIFY_LOG]", line)
+
+        print("/인증 로블닉:{}")
+
+    except Exception as e:
+
+        print(f"로그 저장 실패: {e}") 
+
+
+def set_guild_group_id(guild_id: int, group_id: int) -> None:
+
+cursor.execute( ““” INSERT INTO group_settings(guild_id, group_id)
+
+VALUES(?, ?) ON CONFLICT(guild_id) DO UPDATE SET
+
+group_id=excluded.group_id “““, (guild_id, group_id), ) conn.commit()
+
+
+def get_guild_role_id(guild_id: int) -> Optional[int]:
+
+cursor.execute(“SELECT role_id FROM settings WHERE guild_id=?”,
+
+(guild_id,)) row = cursor.fetchone() return row[0] if row else None
+
+
+def set_guild_role_id(guild_id: int, role_id: int) -> None:
+
+cursor.execute( ““” INSERT INTO settings(guild_id, role_id) VALUES(?, ?)
+
+ON CONFLICT(guild_id) DO UPDATE SET role_id=excluded.role_id “““,
+
+(guild_id, role_id), ) conn.commit()
+
+
+def clean_rank_name(rank_name: str) -> str: ““” ‘RPKA | 육군’ → ‘육군’
+
+‘LD | 개발팀장’ → ‘개발팀장’ ““” if not rank_name: return “?”
+
+
+    if "|" in rank_name:
+
+        return rank_name.split("|")[-1].strip() 
+
+
+    return rank_name.strip() 
+
+
+def set_log_channel(guild_id: int, log_type: str, channel_id: int |
+
+None): if channel_id is None: cursor.execute( “DELETE FROM logchannels
+
+WHERE guildid=? AND logtype=?”, (guild_id, log_type), ) else:
+
+cursor.execute( ““” INSERT INTO logchannels(guildid, logtype, channelid)
+
+VALUES (?, ?, ?) ON CONFLICT(guildid, logtype) DO UPDATE SET
+
+channelid=excluded.channelid “““, (guild_id, log_type, channel_id), )
+
+conn.commit()
+
+
+def get_log_channel(guild_id: int, log_type: str) -> int | None:
+
+cursor.execute( “SELECT channelid FROM logchannels WHERE guildid=? AND
+
+logtype=?”, (guild_id, log_type), ) row = cursor.fetchone() return
+
+row[0] if row else None
+
+
+def get_guild_admin_role_ids(guild_id: int) -> list[int]:
+
+cursor.execute(“SELECT admin_role_id FROM settings WHERE guild_id=?”,
+
+(guild_id,)) row = cursor.fetchone() if not row or not row[0]: return []
+
+try: import json
+
+
+        if isinstance(row[0], str):
+
+            return list(map(int, json.loads(row[0])))
+
+        return [int(row[0])]
+
+    except Exception:
+
+        return []
+
+
+def set_guild_admin_role_ids(guild_id: int, role_ids: list[int]) ->
+
+None: import json
+
+
+    value = json.dumps(role_ids)
+
+    cursor.execute(
+
+        """
+
+        INSERT INTO settings(guild_id, admin_role_id)
+
+        VALUES(?, ?)
+
+        ON CONFLICT(guild_id) DO UPDATE SET admin_role_id=excluded.admin_role_id
+
+        """,
+
+        (guild_id, value),
+
+    )
+
+    conn.commit()
+
+
+def is_owner(user: discord.abc.User | discord.Member) -> bool: if
+
+OWNER_ID <= 0: return False return int(user.id) == int(OWNER_ID)
+
+
+def is_admin(member: discord.Member) -> bool: # 1) 제작자 if
+
+is_owner(member): return True
+
+
+    # 2) 서버 관리자 권한
+
+    try:
+
+        if member.guild_permissions.administrator:
+
+            return True
+
+    except AttributeError:
+
+        return False 
+
+
+    # 3) 설정된 관리자 역할
+
+    guild = member.guild
+
+    if guild is None:
+
+        return False 
+
+
+    admin_ids = get_guild_admin_role_ids(guild.id)
+
+    if not admin_ids:
+
+        return False 
+
+
+    member_role_ids = {r.id for r in member.roles}
+
+    if any(rid in member_role_ids for rid in admin_ids):
+
+        return True 
+
+
+    return False 
+
+
+def _rank_api_headers(): return { “Content-Type”: “application/json”,
+
+“X-API-KEY”: RANK_API_KEY, }
+
+
+def add_error_log(error_msg: str) -> None:
+
+error_logs.append({“timestamp”: datetime.now(timezone.utc), “message”:
+
+error_msg}) if len(error_logs) > MAX_LOGS: error_logs.pop(0)
+
+
+def generate_code() -> str: return
+
+““.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+
+———- Roblox API ———-
+
+
+ROBLOX_USERNAME_API = “https://users.roblox.com/v1/usernames/users”
+
+ROBLOX_USER_API = “https://users.roblox.com/v1/users/{userId}”
+
+
+async def roblox_get_user_id_by_username(username: str) ->
+
+Optional[int]: payload = {“usernames”: [username], “excludeBannedUsers”:
+
+True} async with aiohttp.ClientSession() as session: try: async with
+
+session.post( ROBLOX_USERNAME_API, json=payload,
+
+timeout=aiohttp.ClientTimeout(total=10), ) as resp: if resp.status !=
+
+200: return None data = await resp.json() results = data.get(“data”, [])
+
+return results[0].get(“id”) if results else None except Exception as e:
+
+add_error_log(f”roblox_get_user_id: {repr(e)}“) return None
+
+
+async def roblox_get_user_groups(user_id: int) -> list[int]: “““사용자가
+
+속한 Roblox 그룹 ID 목록을 반환합니다.”“” url =
+
+f”https://groups.roblox.com/v2/users/{user_id}/groups/roles” async with
+
+aiohttp.ClientSession() as session: try: async with session.get( url,
+
+timeout=aiohttp.ClientTimeout(total=10) ) as resp: if resp.status !=
+
+200: print( f”DEBUG: Roblox API error for user {user_id}: ” f”status
+
+{resp.status}” ) return []
+
+
+                data = await resp.json()
+
+                print(f"DEBUG: Roblox API response for {user_id}: {data}") 
+
+
+                groups = data.get("data", [])
+
+                group_ids = [
+
+                    g.get("group", {}).get("id")
+
+                    for g in groups
+
+                    if g.get("group")
+
+                ]
+
+                print(f"DEBUG: Extracted group_ids: {group_ids}")
+
+                return group_ids
+
+        except Exception as e:
+
+            add_error_log(f"roblox_get_user_groups: {repr(e)}")
+
+            print(f"DEBUG: Exception in roblox_get_user_groups: {e}")
+
+            return [] 
+
+
+async def roblox_get_description_by_user_id(user_id: int) ->
+
+Optional[str]: url = ROBLOX_USER_API.format(userId=user_id) async with
+
+aiohttp.ClientSession() as session: try: async with session.get(url,
+
+timeout=aiohttp.ClientTimeout(total=10)) as resp: if resp.status != 200:
+
+return None data = await resp.json() return data.get(“description”)
+
+except Exception as e: add_error_log(f”roblox_get_description:
+
+{repr(e)}“) return None
+
+
+def get_officer_role_id(guild_id: int) -> Optional[int]:
+
+cursor.execute(“SELECT officer_role_id FROM officer_settings WHERE
+
+guild_id=?”, (guild_id,)) row = cursor.fetchone() return row[0] if row
+
+else None
+
+
+def set_officer_role_id(guild_id: int, role_id: int) -> None:
+
+cursor.execute( “““INSERT OR REPLACE INTO officer_settings(guild_id,
+
+officer_role_id) VALUES(?, ?)”““, (guild_id, role_id), ) conn.commit()
+
+
+———- 인증 View ———-
+
+
+class VerifyView(discord.ui.View): def init(self, code: str,
+
+expire_time: datetime, guild_id: int): super().__init__(timeout=300)
+
+self.code = code self.expire_time = expire_time self.guild_id = guild_id
+
+
+———- View 클래스 ———-
+
+
+def send_log_to_web(guild_id: int, user_id: int, action: str, detail:
+
+str): try: resp = requests.post(
+
+“https://web-api-production-69fc.up.railway.app/api/log”, # ← /api/log
+
+로 변경 json={ “guild_id”: guild_id, “user_id”: user_id, “action”:
+
+action, “detail”: detail, }, timeout=5, ) print(“[WEB_LOG]”,
+
+resp.status_code, resp.text) except Exception as e:
+
+print(“[WEB_LOG_ERROR]”, repr(e))
+
+
+class VerifyView(discord.ui.View): def init( self, code: str,
+
+expiretime: datetime, guildid: int, roblox_nick: str, roblox_user_id:
+
+int, ): super().__init__(timeout=300) self.code = code self.expiretime =
+
+expiretime self.guildid = guildid self.roblox_nick = roblox_nick
+
+self.roblox_user_id = roblox_user_id
+
+
+    @discord.ui.button(label="인증하기", style=discord.ButtonStyle.green)
+
+    async def verifybutton(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        if interaction is None:
+
+            return 
+
+
+        try:
+
+            # 0) 길드 확보
+
+            guild: Optional[discord.Guild] = interaction.guild or bot.get_guild(self.guildid)
+
+            if guild is None:
+
+                print(
+
+                    f"[WEB_LOG_ERROR_VERIFY_BUTTON] guild is None, "
+
+                    f"user={interaction.user} guild_id={self.guildid}"
+
+                )
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "길드를 찾을 수 없습니다. 서버에서 다시 /인증 해 주세요.",
+
+                        ephemeral=True,
+
+                    )
+
+                return 
+
+
+            # 1) 만료 체크
+
+            if datetime.now() > self.expiretime:
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "인증 코드가 만료되었습니다. 다시 /인증 명령을 사용해 주세요.",
+
+                        ephemeral=True,
+
+                    )
+
+                return 
+
+
+            # 2) Roblox 프로필 설명에서 코드 확인
+
+            description = await roblox_get_description_by_user_id(self.roblox_user_id)
+
+            if description is None:
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "Roblox 프로필 설명을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+
+                        ephemeral=True,
+
+                    )
+
+                return 
+
+
+            if self.code not in description:
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "Roblox 프로필 설명에 인증 코드가 없습니다. 설명에 코드를 넣고 다시 시도해 주세요.",
+
+                        ephemeral=True,
+
+                    )
+
+                return 
+
+
+            # 3) 역할 부여
+
+            roleid = get_guild_role_id(guild.id)
+
+            if not roleid:
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "서버에 인증 역할이 설정되어 있지 않습니다. 관리자에게 문의해 주세요.",
+
+                        ephemeral=True,
+
+                    )
+
+                return 
+
+
+            role = guild.get_role(roleid)
+
+            if role is None:
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "서버에서 인증 역할을 찾을 수 없습니다. 관리자에게 문의해 주세요.",
+
+                        ephemeral=True,
+
+                    )
+
+                return 
+
+
+            member = guild.get_member(interaction.user.id)
+
 
         data = resp.json()
         # 한 건이라도 있으면 이미 인증한 걸로 간주

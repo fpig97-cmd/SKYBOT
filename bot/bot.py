@@ -515,10 +515,13 @@ class VerifyView(discord.ui.View):
             return
 
         try:
-            # 길드 확보
+            # 0) 길드 확보
             guild: Optional[discord.Guild] = interaction.guild or bot.get_guild(self.guildid)
             if guild is None:
-                print(f"[WEB_LOG_ERROR_VERIFY_BUTTON] guild is None, user={interaction.user} guild_id={self.guildid}")
+                print(
+                    f"[WEB_LOG_ERROR_VERIFY_BUTTON] guild is None, "
+                    f"user={interaction.user} guild_id={self.guildid}"
+                )
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
                         "길드를 찾을 수 없습니다. 서버에서 다시 /인증 해 주세요.",
@@ -617,14 +620,34 @@ class VerifyView(discord.ui.View):
             except Exception as e:
                 print("[VERIFY_LOG_ERROR]", e)
 
-            # 6) 웹 로그 전송
+            # 6) 웹 로그
             send_log_to_web(
                 guild_id=guild.id,
                 user_id=interaction.user.id,
                 action="verify_success",
                 detail=f"{self.roblox_nick} ({self.roblox_user_id})",
             )
-            
+
+            # 7) 인증 성공 로그 embed
+            try:
+                log_ch_id = get_log_channel(guild.id, "verify")
+                if log_ch_id:
+                    log_ch = guild.get_channel(log_ch_id) or await guild.fetch_channel(log_ch_id)
+                    if log_ch:
+                        success_embed = make_verify_embed(
+                            VerifyLogType.SUCCESS,
+                            user=member,
+                            roblox_nick=self.roblox_nick,
+                            group_rank=rankname,
+                            account_age_days=None,
+                            new_nick=member.nick,
+                            at_time=datetime.now(),
+                        )
+                        await log_ch.send(embed=success_embed)
+            except Exception as e:
+                print("[VERIFY_SUCCESS_LOG_ERROR]", repr(e))
+
+            # 8) 유저 응답
             if not interaction.response.is_done():
                 await interaction.response.send_message("인증이 완료되었습니다!", ephemeral=True)
 
@@ -806,13 +829,12 @@ def make_bulk_rank_summary_embed(
 async def verify(interaction: discord.Interaction, 로블닉: str):
     await interaction.response.defer(ephemeral=True)
 
-    # ★ /인증 명령 로그
+
     print(
         f"/인증 로블닉:{로블닉} "
         f"(user={interaction.user} id={interaction.user.id})"
     )
 
-    # ★ 웹 API 기준으로 이미 인증 여부 확인
     if is_already_verified(interaction.guild.id, interaction.user.id):
         await interaction.followup.send(
             "이미 인증된 사용자입니다. (웹 로그 기준)",
@@ -820,7 +842,6 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         )
         return
 
-    # 로블록스 유저 ID 조회
     user_id = await roblox_get_user_id_by_username(로블닉)
     if not user_id:
         await interaction.followup.send(
@@ -828,20 +849,18 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
             ephemeral=True,
         )
         return
+    
 
-    # ✅ 블랙리스트 체크 (DB 유지하려면 이 부분은 그대로 둠)
     cursor.execute(
         "SELECT group_id FROM blacklist WHERE guild_id=?",
         (interaction.guild.id,),
     )
     blacklist_groups = {row[0] for row in cursor.fetchall()}
-
-
     if blacklist_groups:
         
+
         user_groups = await roblox_get_user_groups(user_id)
         blocked_groups = [g for g in user_groups if g in blacklist_groups]
-
         if blocked_groups:
             await interaction.followup.send(
                 "❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n"
@@ -850,15 +869,15 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
             )
             return
 
-    # 인증 코드 생성
     code = generate_code()
     expire_time = datetime.now() + timedelta(minutes=5)
 
-    embed = discord.Embed(
+    # DM용 안내 embed
+    dm_embed = discord.Embed(
         title="로블록스 인증",
         color=discord.Color.blue(),
     )
-    embed.description = (
+    dm_embed.description = (
         f"> Roblox: `{로블닉}` (ID: `{user_id}`)\n"
         f"> 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         "1️⃣ Roblox 프로필로 이동\n"
@@ -869,7 +888,6 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         "Made by Lunar"
     )
 
-    # ✅ DB 대신 View 에 모든 정보를 넘김
     view = VerifyView(
         code=code,
         expiretime=expire_time,
@@ -878,8 +896,25 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         roblox_user_id=user_id,
     )
 
+    # ✅ 인증 요청 로그 채널로 전송
     try:
-        await interaction.user.send(embed=embed, view=view)
+        log_ch_id = get_log_channel(interaction.guild.id, "verify")
+        if log_ch_id:
+            log_ch = interaction.guild.get_channel(log_ch_id) or await interaction.guild.fetch_channel(log_ch_id)
+            if log_ch:
+                req_embed = make_verify_embed(
+                    VerifyLogType.REQUEST,
+                    user=interaction.user,
+                    roblox_nick=로블닉,
+                    code=code,
+                )
+                await log_ch.send(embed=req_embed)
+    except Exception as e:
+        print("[VERIFY_REQUEST_LOG_ERROR]", repr(e))
+
+    # DM 전송
+    try:
+        await interaction.user.send(embed=dm_embed, view=view)
         await interaction.followup.send("📩 DM을 확인해주세요.", ephemeral=True)
     except discord.Forbidden:
         await interaction.followup.send(

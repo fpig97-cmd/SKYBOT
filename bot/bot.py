@@ -1352,31 +1352,48 @@ async def view_verification_log(interaction: discord.Interaction, 최근: int = 
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
 
-    log_file = os.path.join(BASE_DIR, "verification_log.txt")
-    
-    if not os.path.exists(log_file):
-        await interaction.response.send_message("인증 로그가 없습니다.", ephemeral=True)
-        return
+    await interaction.response.defer(ephemeral=True)
 
     try:
-        with open(log_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        recent_lines = lines[-최근:]
-        msg = "".join(recent_lines) or "로그가 비어있습니다."
-        
-        embed = discord.Embed(
-            title="인증 로그",
-            description=f"```\n{msg[:1900]}\n```",
-            color=discord.Color.blue()
+        resp = requests.get(
+            f"{API_BASE}/api/logs/verify",
+            params={
+                "guild_id": interaction.guild.id,
+                "user_id": interaction.user.id,  # or 특정 유저만, 전체면 이 줄 빼기
+                "limit": 최근,
+            },
+            timeout=5,
         )
-        embed.set_footer(text=f"최근 {len(recent_lines)}개 / 전체 {len(lines)}개")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-    except Exception as e:
-        await interaction.response.send_message(f"로그 읽기 실패: {e}", ephemeral=True)
+        if resp.status_code != 200:
+            await interaction.followup.send(
+                f"웹 로그 조회 실패: {resp.status_code} {resp.text}",
+                ephemeral=True,
+            )
+            return
 
+        data = resp.json()
+        if not data:
+            await interaction.followup.send("인증 로그가 없습니다.", ephemeral=True)
+            return
+
+        # 문자열로 포맷
+        lines = [
+            f"{i+1}. [{item['created_at']}] {item['detail']} (user_id={item['user_id']})"
+            for i, item in enumerate(data)
+        ]
+        msg = "\n".join(lines)
+
+        embed = discord.Embed(
+            title="인증 로그 (웹)",
+            description=f"```\n{msg[:1900]}\n```",
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text=f"최근 {len(data)}개")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(f"로그 읽기 실패: {e}", ephemeral=True)
 @bot.tree.command(
     name="일괄닉네임변경",
     description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)"

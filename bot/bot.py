@@ -16,7 +16,7 @@ resp.status_code != 200: print("[WEB_CHECK_ERROR]”, resp.status_code,
 resp.text) return False
 
         data = resp.json()
-        # 한 건이라도 있으면 이미 인증한 걸로 간주
+        # 한 건이라도 있으면
         return len(data) > 0
     except Exception as e:
         print("[WEB_CHECK_EXCEPTION]", repr(e))

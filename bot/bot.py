@@ -2466,7 +2466,7 @@ ALLOWED_USER_IDS = [
 ]
 
 TIMEOUT_DURATION = timedelta(days=1)
-LOG_CHANNEL_ID = 333333333333333333
+LOG_CHANNEL_ID = 1468191965052141629
 # ==========================================
 
 def contains_target_custom_emoji(message: discord.Message):

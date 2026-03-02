@@ -18,18 +18,22 @@ import requests
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨
 
-def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str) -> None:
-    import requests
+def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str):
+    print("[WEB-LOG] send_log_to_web called", guild_id, user_id, action, detail)
     try:
-        payload = {
-            "guild_id": guild_id,
-            "user_id": user_id,
-            "action": action,
-            "detail": detail,
-        }
-        requests.post(LOG_API_URL, json=payload, timeout=3)
-    except Exception:
-        # 웹 죽어 있어도 봇은 멈추면 안 되니까 조용히 무시
+        res = requests.post(
+            "https://web-api-production-69fc.up.railway.app/api/logs/verify",
+            json={
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "action": action,
+                "detail": detail,
+            },
+            timeout=5,
+        )
+        print("[WEB-LOG] status", res.status_code, res.text)
+    except Exception as e:
+        print("[WEB-LOG] error", e)
         pass
 
 intents = discord.Intents.default()
@@ -569,11 +573,12 @@ class VerifyView(discord.ui.View):
             # 웹 로그 전송
             try:
                 send_log_to_web(
-                    guild_id=self.guild_id,
+                    guild_id=interaction.guild.id,
                     user_id=interaction.user.id,
                     action="verify_success",
-                    detail=f"{nick} ({roblox_user_id})",
+                    detail=f"{roblox_nick} ({roblox_user_id})",
                 )
+
             except Exception as e:
                 # send_log_to_web 내부에서 이미 예외 처리하지만, 혹시 몰라 한 번 더 방어
                 print("[WEB_LOG_ERROR_VERIFY_BUTTON]", e)
@@ -1345,10 +1350,11 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
     )
     send_log_to_web(
         guild_id=interaction.guild.id,
-        user_id=user.id,
-        action="force_verify",
-        detail=roblox_nick
+        user_id=interaction.user.id,
+        action="verify_success",
+        detail=f"{roblox_nick} ({roblox_user_id})",
     )
+
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="인증로그보기", description="인증 기록을 확인합니다. (관리자)")

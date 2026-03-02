@@ -15,6 +15,32 @@ from discord.ext import tasks
 from discord.ext import commands
 from dotenv import load_dotenv
 import requests
+from fastapi import FastAPI
+from pydantic import BaseModel
+from datetime import datetime
+
+app = FastAPI()
+
+class VerifyLogCreate(BaseModel):
+    guild_id: int
+    user_id: int
+    action: str
+    detail: str
+
+@app.post("/api/logs/verify")
+async def create_verify_log(payload: VerifyLogCreate):
+    # 예시: Postgres/SQLite 등에 INSERT
+    # conn, cursor 는 네가 이미 쓰는 DB 커넥션 기준으로 맞춰줘
+    cursor.execute(
+        """
+        INSERT INTO verify_logs (guild_id, user_id, action, detail, created_at)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (payload.guild_id, payload.user_id, payload.action, payload.detail, datetime.utcnow()),
+    )
+    conn.commit()
+    return {"status": "ok"}
+
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨
 

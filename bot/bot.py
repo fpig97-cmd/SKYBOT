@@ -449,14 +449,13 @@ class VerifyView(discord.ui.View):
                     await interaction.response.send_message("서버 정보를 찾을 수 없습니다.", ephemeral=True)
                 return
 
-            # DB에서 인증 정보 조회
-            cursor.execute(
-                "SELECT robloxnick, robloxuserid, expiretime, code "
-                "FROM users WHERE discordid=? AND guildid=?",
-                (interaction.user.id, self.guild_id),
-            )
+        cursor.execute(
+            "SELECT roblox_nick, roblox_user_id, expire_time, code "
+            "FROM users WHERE discord_id=? AND guild_id=?",
+            (interaction.user.id, self.guild_id),
+        )
             data = cursor.fetchone()
-            
+
             if not data:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(

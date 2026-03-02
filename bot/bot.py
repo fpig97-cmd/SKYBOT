@@ -2453,6 +2453,88 @@ async def before_rank_log_task():
 
     
 
+TARGET_CUSTOM_EMOJI_IDS = [
+    123456789012345678  # 감지할 커스텀 이모지 ID
+]
+
+ALLOWED_ROLE_IDS = [
+    111111111111111111
+]
+
+ALLOWED_USER_IDS = [
+    222222222222222222
+]
+
+TIMEOUT_DURATION = timedelta(days=1)
+LOG_CHANNEL_ID = 333333333333333333
+# ==========================================
+
+def contains_target_custom_emoji(message: discord.Message):
+    if not message.guild:
+        return False
+
+    for emoji in message.guild.emojis:
+        if emoji.id in TARGET_CUSTOM_EMOJI_IDS:
+            if str(emoji) in message.content:
+                return True
+    return False
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot:
+        return
+
+    # 🎯 커스텀 이모지 감지
+    if contains_target_custom_emoji(message):
+
+        # 🔓 허용 유저
+        if message.author.id in ALLOWED_USER_IDS:
+            return
+
+        # 🔓 허용 역할
+        user_role_ids = [role.id for role in message.author.roles]
+        if any(role_id in ALLOWED_ROLE_IDS for role_id in user_role_ids):
+            return
+
+        try:
+            # ⏰ 종료 시간 계산
+            timeout_until = datetime.now(timezone.utc) + TIMEOUT_DURATION
+            unix_timestamp = int(timeout_until.timestamp())
+
+            # 🔒 타임아웃
+            await message.author.timeout(
+                TIMEOUT_DURATION,
+                reason="관인 남용"
+            )
+
+            # 📦 Embed
+            embed = discord.Embed(
+                description=(
+                    "> ⛔ 타임아웃 안내\n"
+                    f"> 대상자 : {message.author.mention}\n"
+                    "> 사유 : 관인 남용\n"
+                    f"> 기간 : 1일 후 <t:{unix_timestamp}:F>"
+                ),
+                color=0xED4245
+            )
+
+            now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            embed.set_footer(
+                text=f"Made By Lunar • {now_time}"
+            )
+
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                await log_channel.send(embed=embed)
+
+        except discord.Forbidden:
+            print("권한 부족")
+        except Exception as e:
+            print("오류:", e)
+
+    await bot.process_commands(message)
+    
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():

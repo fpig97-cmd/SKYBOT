@@ -18,24 +18,6 @@ import requests
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨
 
-def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str):
-    print("[WEB-LOG] send_log_to_web called", guild_id, user_id, action, detail)
-    try:
-        res = requests.post(
-            "https://web-api-production-69fc.up.railway.app/api/logs/verify",
-            json={
-                "guild_id": guild_id,
-                "user_id": user_id,
-                "action": action,
-                "detail": detail,
-            },
-            timeout=5,
-        )
-        print("[WEB-LOG] status", res.status_code, res.text)
-    except Exception as e:
-        print("[WEB-LOG] error", e)
-        pass
-
 intents = discord.Intents.default()
 intents.members = True
 
@@ -432,71 +414,93 @@ class VerifyView(discord.ui.View):
         self.guild_id = guild_id
 
 # ---------- View 클래스 ----------
+def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str):
+    """웹 API로 인증 로그 전송."""
+    try:
+        resp = requests.post(
+            "https://web-api-production-69fc.up.railway.app/api/logs/verify",
+            json={
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "action": action,
+                "detail": detail,
+            },
+            timeout=5,
+        )
+        print("[WEB_LOG]", resp.status_code, resp.text)
+    except Exception as e:
+        print("[WEB_LOG_ERROR]", repr(e))
+
+
 class VerifyView(discord.ui.View):
-    def __init__(self, code: str, expire_time: datetime, guild_id: int):
+    def __init__(self, code: str, expiretime: datetime, guildid: int):
         super().__init__(timeout=300)
         self.code = code
-        self.expire_time = expire_time
-        self.guild_id = guild_id
+        self.expiretime = expiretime
+        self.guildid = guildid
 
     @discord.ui.button(label="인증하기", style=discord.ButtonStyle.green)
-    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def verifybutton(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction is None:
+            return
+
         try:
-            print(f"/인증 버튼 클릭: user={interaction.user} guild={interaction.guild_id}")
+            # guild 우선 확보 (interaction.guild 없을 때 대비)
+            guild: Optional[discord.Guild] = interaction.guild or bot.get_guild(self.guildid)
 
-            if interaction is None:
-                return
-
-            guild = interaction.client.get_guild(self.guild_id)
             if guild is None:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("서버 정보를 찾을 수 없습니다.", ephemeral=True)
-                return
-
-            cursor.execute(
-                "SELECT roblox_nick, roblox_user_id, expire_time, code "
-                "FROM users WHERE discord_id=? AND guild_id=?",
-                (interaction.user.id, self.guild_id),
-            )
-            data = cursor.fetchone()
-
-            if not data:
+                print(f"[WEB_LOG_ERROR_VERIFY_BUTTON] guild is None, user={interaction.user} guild_id={self.guildid}")
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "인증 정보를 찾을 수 없습니다. 처음부터 다시 인증을 시작해 주세요.",
+                        "길드를 찾을 수 없습니다. 서버에서 다시 /인증 해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            nick, roblox_user_id, expire_str, saved_code = data
-            expire = datetime.fromisoformat(expire_str)
+            # DB에서 유저/코드 조회
+            cursor.execute(
+                "SELECT robloxnick, robloxuserid, expiretime, code FROM users WHERE discordid=? AND guildid=?",
+                (interaction.user.id, self.guildid),
+            )
+
+            data = cursor.fetchone()
+            if not data:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "인증 정보를 찾을 수 없습니다. 다시 /인증 명령을 사용해 주세요.",
+                        ephemeral=True,
+                    )
+                return
+
+            nick, robloxuserid, expirestr, savedcode = data
+            expire = datetime.fromisoformat(expirestr)
 
             if datetime.now() > expire:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "인증 코드가 만료되었습니다. 다시 /인증을 사용해 주세요.",
+                        "인증 코드가 만료되었습니다. 다시 /인증 명령을 사용해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            if saved_code != self.code:
+            if savedcode != self.code:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "인증 코드가 일치하지 않습니다. 다시 시도해 주세요.",
+                        "인증 코드가 일치하지 않습니다. 다시 /인증 명령을 사용해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            if not roblox_user_id:
+            if not robloxuserid:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "Roblox 사용자 정보를 찾을 수 없습니다.",
+                        "Roblox ID 정보를 찾을 수 없습니다. 다시 시도해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            # 프로필 설명에서 코드 확인
-            description = await roblox_get_description_by_user_id(roblox_user_id)
+            # Roblox 프로필 설명에서 코드 검증
+            description = await roblox_get_description_by_user_id(robloxuserid)
             if description is None:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
@@ -508,26 +512,26 @@ class VerifyView(discord.ui.View):
             if self.code not in description:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "프로필 설명에서 인증 코드를 찾을 수 없습니다.",
+                        "Roblox 프로필 설명에 인증 코드가 없습니다. 설명에 코드를 넣고 다시 시도해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            # 역할 지급
-            role_id = get_guild_role_id(self.guild_id)
-            if not role_id:
+            # 서버 설정에서 역할 ID 가져오기
+            roleid = get_guild_role_id(self.guildid)
+            if not roleid:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "인증 역할이 설정되어 있지 않습니다. 서버 관리자에게 문의해 주세요.",
+                        "서버에 인증 역할이 설정되어 있지 않습니다. 관리자에게 문의해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            role = guild.get_role(role_id)
+            role = guild.get_role(roleid)
             if role is None:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "인증 역할을 찾을 수 없습니다. 서버 관리자에게 문의해 주세요.",
+                        "서버에서 인증 역할을 찾을 수 없습니다. 관리자에게 문의해 주세요.",
                         ephemeral=True,
                     )
                 return
@@ -536,69 +540,83 @@ class VerifyView(discord.ui.View):
             if member is None:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "서버에서 회원 정보를 찾을 수 없습니다.",
+                        "서버에서 회원 정보를 찾을 수 없습니다. 다시 시도해 주세요.",
                         ephemeral=True,
                     )
                 return
 
-            try:
-                await member.add_roles(role)
-            except Exception as e:
-                print("닉네임/역할 변경 실패:", e)
+            # 역할 부여
+            await member.add_roles(role)
 
-            # 닉네임 설정 (기존 로직 유지 가능)
+            # (선택) 랭크 API 호출해서 닉네임 변경
+            rankname = "?"
             try:
-                new_nick = nick
-                if len(new_nick) > 32:
-                    new_nick = new_nick[:32]
-                if member.nick != new_nick:
-                    await member.edit(nick=new_nick)
+                if RANK_API_URL_ROOT:
+                    resp = requests.post(
+                        f"{RANK_API_URL_ROOT}/bulk-status",
+                        json={"usernames": [nick]},
+                        headers=_rank_api_headers(),
+                        timeout=15,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        results = data.get("results", [])
+                        if results and results[0].get("success"):
+                            roleinfo = results[0].get("role") or {}
+                            rankname = roleinfo.get("name", "?")
+                        else:
+                            rankname = "?"
+                    else:
+                        rankname = "?"
+                # 닉네임 포맷팅
+                if " " in rankname:
+                    rankname = rankname.split(" - ")[-1]
+                newnick = f"[{rankname}] {nick}"
+                if len(newnick) > 32:
+                    newnick = newnick[:32]
+                try:
+                    await member.edit(nick=newnick)
+                except Exception as e:
+                    print("[NICK_EDIT_ERROR]", e)
             except Exception as e:
-                print("닉네임 변경 실패:", e)
+                print("[RANK_API_ERROR]", e)
 
-            # DB에서 verified=1 로 표시
+            # DB 업데이트
             cursor.execute(
-                "UPDATE users SET verified=1 WHERE discord_id=? AND guild_id=?",
-                (interaction.user.id, self.guild_id),
+                "UPDATE users SET verified=1 WHERE discordid=? AND guildid=?",
+                (interaction.user.id, self.guildid),
             )
-
+            cursor.execute("INSERT OR IGNORE INTO stats(guildid) VALUES(?)", (self.guildid,))
+            cursor.execute(
+                "UPDATE stats SET verifycount = verifycount + 1 WHERE guildid=?",
+                (self.guildid,),
+            )
             conn.commit()
 
-            # 기존 파일 로그
+            # 파일 + 콘솔에 인증 로그
             try:
-                save_verification_log(interaction.user.name, nick)
+                discordnick = member.name
+                save_verification_log(discordnick, nick)
             except Exception as e:
-                print("save_verification_log 오류:", e)
+                print("[VERIFY_LOG_ERROR]", e)
 
-            # 웹 로그 전송
-            try:
-                send_log_to_web(
-                    guild_id=interaction.guild.id,
-                    user_id=interaction.user.id,
-                    action="verify_success",
-                    detail=f"{roblox_nick} ({roblox_user_id})",
-                )
-
-            except Exception as e:
-                # send_log_to_web 내부에서 이미 예외 처리하지만, 혹시 몰라 한 번 더 방어
-                print("[WEB_LOG_ERROR_VERIFY_BUTTON]", e)
-
-            # 성공 메시지
-            embed = discord.Embed(
-                title="✅ 인증 완료",
-                description=f"{member.mention} 님, Roblox 계정 **{nick}** 인증이 완료되었습니다.",
-                color=discord.Color.green(),
+            # 웹 API로 인증 성공 로그 전송
+            send_log_to_web(
+                guild_id=self.guildid,
+                user_id=interaction.user.id,
+                action="verify_success",
+                detail=f"{nick} ({robloxuserid})",
             )
+
             if not interaction.response.is_done():
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message("인증이 완료되었습니다!", ephemeral=True)
 
         except Exception as e:
-            import traceback
-            print("[VERIFY_BUTTON_ERROR]", e)
-            traceback.print_exc()
+            add_error_log(f"verifybutton: {repr(e)}")
+            print("[WEB_LOG_ERROR_VERIFY_BUTTON]", repr(e))
             if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    "⚠ 인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+                    "인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
                     ephemeral=True,
                 )
 
@@ -1352,7 +1370,7 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
         guild_id=interaction.guild.id,
         user_id=interaction.user.id,
         action="verify_success",
-        detail=f"{roblox_nick} ({roblox_user_id})",
+        detail=f"{roblox_nick} ({user_id})",
     )
 
     await interaction.followup.send(embed=embed, ephemeral=True)

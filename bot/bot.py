@@ -16,14 +16,6 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import requests
 from datetime import datetime
-from pydantic import BaseModel
-
-class VerifyLogCreate(BaseModel):
-    guild_id: int
-    user_id: int
-    action: str
-    detail: str
-
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨
 

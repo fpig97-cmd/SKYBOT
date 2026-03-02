@@ -17,6 +17,31 @@ from dotenv import load_dotenv
 import requests
 from datetime import datetime
 
+API_BASE = "https://web-api-production-69fc.up.railway.app"
+
+def is_already_verified(guild_id: int, user_id: int) -> bool:
+    try:
+        resp = requests.get(
+            f"{API_BASE}/api/logs/verify",
+            params={
+                "guild_id": guild_id,
+                "user_id": user_id,
+                "limit": 1,
+            },
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            print("[WEB_CHECK_ERROR]", resp.status_code, resp.text)
+            return False
+
+        data = resp.json()
+        # 한 건이라도 있으면 이미 인증한 걸로 간주
+        return len(data) > 0
+    except Exception as e:
+        print("[WEB_CHECK_EXCEPTION]", repr(e))
+        return False
+
+
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨
 
 intents = discord.Intents.default()
@@ -588,6 +613,14 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         f"/인증 로블닉:{로블닉}"
         f"(user={interaction.user} id={interaction.user.id})"
     )
+
+        # ★ 웹 API 기준으로 이미 인증 여부 확인
+    if is_already_verified(interaction.guild.id, interaction.user.id):
+        await interaction.followup.send(
+            "이미 인증된 사용자입니다.(웹 로그 기준)",
+            ephemeral=True,
+        )
+        return
 
     # 이미 인증 여부는 DB 대신 나중에 필요하면 따로 구현하거나, 지금은 생략
     # (지금 목표는 DB 의존 제거)

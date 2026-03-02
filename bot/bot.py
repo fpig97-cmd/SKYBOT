@@ -15,7 +15,6 @@ from discord.ext import tasks
 from discord.ext import commands
 from dotenv import load_dotenv
 import requests
-from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
 

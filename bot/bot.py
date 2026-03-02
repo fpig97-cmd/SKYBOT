@@ -16,6 +16,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import requests
 from datetime import datetime
+from enum import Enum
 
 API_BASE = "https://web-api-production-69fc.up.railway.app"
 
@@ -161,6 +162,16 @@ cursor.execute(
     )"""
 )
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS logchannels (
+    guildid   INTEGER,
+    logtype   TEXT,
+    channelid INTEGER,
+    PRIMARY KEY (guildid, logtype)
+)
+""")
+conn.commit()
+
 cursor.execute(
     """CREATE TABLE IF NOT EXISTS officer_settings(
         guild_id INTEGER PRIMARY KEY,
@@ -269,6 +280,31 @@ def set_guild_role_id(guild_id: int, role_id: int) -> None:
     )
     conn.commit()
 
+def set_log_channel(guild_id: int, log_type: str, channel_id: int | None):
+    if channel_id is None:
+        cursor.execute(
+            "DELETE FROM logchannels WHERE guildid=? AND logtype=?",
+            (guild_id, log_type),
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO logchannels(guildid, logtype, channelid)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guildid, logtype)
+            DO UPDATE SET channelid=excluded.channelid
+            """,
+            (guild_id, log_type, channel_id),
+        )
+    conn.commit()
+
+def get_log_channel(guild_id: int, log_type: str) -> int | None:
+    cursor.execute(
+        "SELECT channelid FROM logchannels WHERE guildid=? AND logtype=?",
+        (guild_id, log_type),
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
 
 def get_guild_admin_role_ids(guild_id: int) -> list[int]:
     cursor.execute("SELECT admin_role_id FROM settings WHERE guild_id=?", (guild_id,))
@@ -600,6 +636,168 @@ class VerifyView(discord.ui.View):
                     "인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
                     ephemeral=True,
                 )
+# ---------- 클래스 ----------
+class VerifyLogType(str, Enum):
+    REQUEST = "request"
+    SUCCESS = "success"
+    NO_GROUP = "no_group"
+    INVALID_NICK = "invalid_nick"
+
+class RankLogType(str, Enum):
+    PROMOTE = "promote"
+    DEMOTE = "demote"
+
+class RankSummaryType(str, Enum):
+    BULK_PROMOTE = "bulk_promote"
+    BULK_DEMOTE = "bulk_demote"
+# ---------- 엠베드 ----------
+def make_verify_embed(
+    log_type: VerifyLogType,
+    *,
+    user: discord.abc.User | discord.Member | None = None,
+    roblox_nick: str | None = None,
+    group_rank: str | None = None,
+    account_age_days: int | None = None,
+    code: str | None = None,
+    new_nick: str | None = None,
+    group_id: int | None = None,
+    input_nick: str | None = None,
+    fail_reason: str | None = None,
+    at_time: datetime | None = None,
+) -> discord.Embed:
+    at_time = at_time or datetime.now()
+
+    if log_type is VerifyLogType.REQUEST:
+        embed = discord.Embed(
+            title="📩 인증 요청",
+            color=discord.Color.blurple(),
+            description="새로운 인증 코드 발급",
+        )
+        if user:
+            embed.add_field(name="유저", value=user.mention, inline=False)
+        if roblox_nick:
+            embed.add_field(name="로블록스", value=f"`{roblox_nick}`", inline=True)
+        if group_rank:
+            embed.add_field(name="그룹 랭크", value=group_rank, inline=True)
+        if account_age_days is not None:
+            embed.add_field(name="계정 나이", value=f"{account_age_days}일", inline=True)
+        if code:
+            embed.add_field(name="인증 코드", value=f"`{code}`", inline=True)
+
+    elif log_type is VerifyLogType.SUCCESS:
+        embed = discord.Embed(
+            title="✅ 인증 성공",
+            color=discord.Color.green(),
+            description="새로운 유저가 인증을 완료했습니다.",
+        )
+        if user:
+            embed.add_field(name="유저", value=user.mention, inline=False)
+        if roblox_nick:
+            embed.add_field(name="로블록스", value=f"`{roblox_nick}`", inline=True)
+        if group_rank:
+            embed.add_field(name="그룹 랭크", value=group_rank, inline=True)
+        if account_age_days is not None:
+            embed.add_field(name="계정 나이", value=f"{account_age_days}일", inline=True)
+        if new_nick:
+            embed.add_field(name="새 닉네임", value=f"`{new_nick}`", inline=False)
+        embed.add_field(
+            name="인증 시각",
+            value=at_time.strftime("%Y년 %m월 %d일 %A %p %I:%M"),
+            inline=False,
+        )
+
+    elif log_type is VerifyLogType.NO_GROUP:
+        embed = discord.Embed(
+            title="⚠️ 그룹 미가입",
+            color=discord.Color.orange(),
+            description="그룹 미가입 상태로 인증 실패",
+        )
+        if user:
+            embed.add_field(name="유저", value=user.mention, inline=False)
+        if roblox_nick:
+            embed.add_field(name="로블록스", value=f"`{roblox_nick}`", inline=True)
+        if group_id is not None:
+            embed.add_field(name="그룹 ID", value=str(group_id), inline=True)
+
+    elif log_type is VerifyLogType.INVALID_NICK:
+        embed = discord.Embed(
+            title="❌ 인증 실패",
+            color=discord.Color.red(),
+            description="존재하지 않는 로블록스 닉네임",
+        )
+        if user:
+            embed.add_field(name="유저", value=user.mention, inline=False)
+        if input_nick:
+            embed.add_field(name="입력한 닉네임", value=f"`{input_nick}`", inline=True)
+        embed.add_field(
+            name="실패 사유",
+            value=fail_reason or "사용자를 찾을 수 없음",
+            inline=False,
+        )
+    else:
+        embed = discord.Embed(title="알 수 없는 로그 타입", color=discord.Color.dark_grey())
+
+    embed.set_footer(text="Made By Lunar")
+    return embed
+
+def make_rank_log_embed(
+    log_type: RankLogType,
+    *,
+    target_name: str,
+    old_rank: str,
+    new_rank: str,
+    executor: discord.abc.User | discord.Member | None = None,
+) -> discord.Embed:
+    if log_type is RankLogType.DEMOTE:
+        title = "⬇️ 강등"
+        desc = "멤버가 강등되었습니다."
+        color = discord.Color.red()
+    else:
+        title = "⬆️ 승진"
+        desc = "멤버가 승진되었습니다."
+        color = discord.Color.green()
+
+    embed = discord.Embed(title=title, description=desc, color=color)
+
+    embed.add_field(name="대상", value=f"`{target_name}`", inline=False)
+    embed.add_field(name="이전 랭크", value=old_rank, inline=True)
+    embed.add_field(name="새 랭크", value=new_rank, inline=True)
+
+    if executor:
+        embed.add_field(name="실행자", value=executor.mention, inline=False)
+
+    embed.set_footer(text="Made By Lunar")
+    return embed
+
+def make_bulk_rank_summary_embed(
+    summary_type: RankSummaryType,
+    *,
+    role_name: str,
+    total: int,
+    success: int,
+    failed: int,
+    executor: discord.abc.User | discord.Member | None = None,
+) -> discord.Embed:
+    if summary_type is RankSummaryType.BULK_PROMOTE:
+        title = "일괄 승진 완료"
+        color = discord.Color.green()
+        desc = "여러 멤버 승진 작업이 완료되었습니다."
+    else:
+        title = "일괄 강등 완료"
+        color = discord.Color.red()
+        desc = "여러 멤버 강등 작업이 완료되었습니다."
+
+    embed = discord.Embed(title=title, description=desc, color=color)
+    embed.add_field(name="변경 역할", value=f"`{role_name}`", inline=False)
+    embed.add_field(name="총 처리", value=f"{total}명", inline=True)
+    embed.add_field(name="성공", value=f"{success}명", inline=True)
+    embed.add_field(name="실패", value=f"{failed}명", inline=True)
+
+    if executor:
+        embed.add_field(name="실행자", value=executor.mention, inline=False)
+
+    embed.set_footer(text="Made By Lunar")
+    return embed
 
 # ---------- 슬래시 명령어 ----------
 
@@ -610,49 +808,56 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
 
     # ★ /인증 명령 로그
     print(
-        f"/인증 로블닉:{로블닉}"
+        f"/인증 로블닉:{로블닉} "
         f"(user={interaction.user} id={interaction.user.id})"
     )
 
-        # ★ 웹 API 기준으로 이미 인증 여부 확인
+    # ★ 웹 API 기준으로 이미 인증 여부 확인
     if is_already_verified(interaction.guild.id, interaction.user.id):
         await interaction.followup.send(
-            "이미 인증된 사용자입니다.(웹 로그 기준)",
+            "이미 인증된 사용자입니다. (웹 로그 기준)",
             ephemeral=True,
         )
         return
 
-    # 이미 인증 여부는 DB 대신 나중에 필요하면 따로 구현하거나, 지금은 생략
-    # (지금 목표는 DB 의존 제거)
-
+    # 로블록스 유저 ID 조회
     user_id = await roblox_get_user_id_by_username(로블닉)
     if not user_id:
         await interaction.followup.send(
-            "해당 닉네임의 로블록스 계정을 찾을 수 없습니다.", ephemeral=True
+            "해당 닉네임의 로블록스 계정을 찾을 수 없습니다.",
+            ephemeral=True,
         )
         return
-    # ✅ 블랙리스트 체크 (DB 쓰고 싶으면 이 부분만 남기고, 아니면 이도 제거 가능)
+
+    # ✅ 블랙리스트 체크 (DB 유지하려면 이 부분은 그대로 둠)
     cursor.execute(
         "SELECT group_id FROM blacklist WHERE guild_id=?",
         (interaction.guild.id,),
     )
-    blacklist_groups = set(row[0] for row in cursor.fetchall())
-    if blacklist_groups:
-            user_groups = await roblox_get_user_groups(user_id)
+    blacklist_groups = {row[0] for row in cursor.fetchall()}
 
-            blocked_groups = [g for g in user_groups if g in blacklist_groups]
-            if blocked_groups:
-                await interaction.followup.send(
-                f"❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n"
+
+    if blacklist_groups:
+        
+        user_groups = await roblox_get_user_groups(user_id)
+        blocked_groups = [g for g in user_groups if g in blacklist_groups]
+
+        if blocked_groups:
+            await interaction.followup.send(
+                "❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n"
                 f"차단된 그룹: {', '.join(map(str, blocked_groups))}",
                 ephemeral=True,
             )
             return
 
+    # 인증 코드 생성
     code = generate_code()
     expire_time = datetime.now() + timedelta(minutes=5)
-    
-    embed = discord.Embed(title="로블록스 인증", color=discord.Color.blue())
+
+    embed = discord.Embed(
+        title="로블록스 인증",
+        color=discord.Color.blue(),
+    )
     embed.description = (
         f"> Roblox: `{로블닉}` (ID: `{user_id}`)\n"
         f"> 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -661,10 +866,10 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         "3️⃣ '인증하기' 버튼 클릭\n\n"
         f"🔐 코드: `{code}`\n"
         "⏱ 남은 시간: 5분\n\n"
-        "made by Lunar"
+        "Made by Lunar"
     )
 
-    # ✅ 여기서 DB 대신, View 에 모든 정보를 넘김
+    # ✅ DB 대신 View 에 모든 정보를 넘김
     view = VerifyView(
         code=code,
         expiretime=expire_time,
@@ -678,7 +883,8 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
         await interaction.followup.send("📩 DM을 확인해주세요.", ephemeral=True)
     except discord.Forbidden:
         await interaction.followup.send(
-            "DM 전송 실패. DM 수신을 허용해주세요.", ephemeral=True
+            "DM 전송에 실패했습니다. DM 수신을 허용하고 다시 시도해주세요.",
+            ephemeral=True,
         )
 
 @bot.tree.command(name="설정", description="인증 역할 설정 (관리자)")
@@ -932,12 +1138,37 @@ async def promote_cmd(
 
         if resp.status_code == 200:
             data = resp.json()
-            newRole = data.get("newRole", {})
+            new_role = data.get("newRole", {})  # { name, rank }
+            old_role = data.get("oldRole", {})  # 백엔드에서 같이 주면 사용
+
+            old_rank_str = f"{old_role.get('name','?')} (Rank {old_role.get('rank','?')})"
+            new_rank_str = f"{new_role.get('name','?')} (Rank {new_role.get('rank','?')})"
+
             await interaction.followup.send(
                 f"`{username}` 님을 역할 `{role_name}` 으로 변경했습니다.\n"
-                f"실제 반영: {newRole.get('name','?')} (rank {newRole.get('rank','?')})",
+                f"실제 반영: {new_rank_str}",
                 ephemeral=True,
             )
+
+            # 🔵 그룹변경 로그 채널로 embed 전송
+            guild = interaction.guild
+            if guild:
+                log_channel_id = get_log_channel(guild.id, "group_change")
+                if log_channel_id:
+                    try:
+                        log_ch = guild.get_channel(log_channel_id) or await guild.fetch_channel(log_channel_id)
+                        if log_ch:
+                            embed = make_rank_log_embed(
+                                RankLogType.PROMOTE,
+                                target_name=username,
+                                old_rank=old_rank_str,
+                                new_rank=new_rank_str,
+                                executor=interaction.user,
+                            )
+                            await log_ch.send(embed=embed)
+                    except Exception as e:
+                        print("[RANK_PROMOTE_LOG_ERROR]", repr(e))
+
         else:
             await interaction.followup.send(
                 f"승진 실패 (HTTP {resp.status_code}): {resp.text}",
@@ -971,24 +1202,46 @@ async def demote_to_role_cmd(
 
     try:
         payload = {"username": username, "rank": role_name}
-        print("DEBUG ROOT:", repr(RANK_API_URL_ROOT))
-        print("DEBUG URL:", f"{RANK_API_URL_ROOT}/rank")
+
         resp = requests.post(
             f"{RANK_API_URL_ROOT}/rank",
             json=payload,
             headers=_rank_api_headers(),
             timeout=30,
-        )
-        print("DEBUG STATUS:", resp.status_code, resp.text[:200])
-
+    )
+    
         if resp.status_code == 200:
             data = resp.json()
-            newRole = data.get("newRole", {})
+            new_role = data.get("newRole", {})
+            old_role = data.get("oldRole", {})
+
+            old_rank_str = f"{old_role.get('name','?')} (Rank {old_role.get('rank','?')})"
+            new_rank_str = f"{new_role.get('name','?')} (Rank {new_role.get('rank','?')})"
+
             await interaction.followup.send(
                 f"`{username}` 님을 역할 `{role_name}` 으로 변경했습니다.\n"
-                f"실제 반영: {newRole.get('name','?')} (rank {newRole.get('rank','?')})",
+                f"실제 반영: {new_rank_str}",
                 ephemeral=True,
             )
+
+            guild = interaction.guild
+            if guild:
+                log_channel_id = get_log_channel(guild.id, "group_change")
+                if log_channel_id:
+                    try:
+                        log_ch = guild.get_channel(log_channel_id) or await guild.fetch_channel(log_channel_id)
+                        if log_ch:
+                            embed = make_rank_log_embed(
+                                RankLogType.DEMOTE,
+                                target_name=username,
+                                old_rank=old_rank_str,
+                                new_rank=new_rank_str,
+                                executor=interaction.user,
+                            )
+                            await log_ch.send(embed=embed)
+                    except Exception as e:
+                        print("[RANK_DEMOTE_LOG_ERROR]", repr(e))
+
         else:
             await interaction.followup.send(
                 f"강등 실패 (HTTP {resp.status_code}): {resp.text}",
@@ -1014,7 +1267,7 @@ async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str)
 
     await interaction.response.defer(ephemeral=True)
 
-
+    # 인증된 유저 목록
     cursor.execute(
         "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
         (interaction.guild.id,),
@@ -1025,7 +1278,7 @@ async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str)
         "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
         (interaction.guild.id,),
     )
-    forced_excluded = set([row[0] for row in cursor.fetchall() if row[0]])
+    forced_excluded = {row[0] for row in cursor.fetchall() if row[0]}
 
     all_users = [u for u in verified_users if u not in forced_excluded]
 
@@ -1034,20 +1287,19 @@ async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str)
         return
 
     total = len(all_users)
-    
-    # 대량 처리 경고
+
     if total > 1000:
         await interaction.followup.send(
             f"{total}명 처리 예정 (약 {total // 60}분 소요)\n처리 시작합니다...",
-            ephemeral=True
+            ephemeral=True,
         )
 
     BATCH_SIZE = 100
-    all_results = []
-    
+    all_results: list[dict] = []
+
     for i in range(0, total, BATCH_SIZE):
         batch = all_users[i:i + BATCH_SIZE]
-        
+
         try:
             payload = {"usernames": batch, "rank": role_name}
             resp = requests.post(
@@ -1060,28 +1312,132 @@ async def bulk_promote_to_role(interaction: discord.Interaction, role_name: str)
             if resp.status_code == 200:
                 data = resp.json()
                 all_results.extend(data.get("results", []))
-            
-            # 진행 상황 업데이트 (1000명마다)
+
             if (i + BATCH_SIZE) % 1000 == 0:
                 await interaction.followup.send(
-                    f"진행 중... {i + BATCH_SIZE}/{total}명",
-                    ephemeral=True
+                    f"진행 중... {min(i + BATCH_SIZE, total)}/{total}명",
+                    ephemeral=True,
                 )
-            
-            # Rate limit 방지
+
             await asyncio.sleep(1)
-            
+
         except Exception as e:
             print(f"Batch {i} error: {e}")
             continue
 
-    # 최종 결과
-    embed = discord.Embed(title="일괄 승진 완료", color=discord.Color.green())
-    embed.add_field(name="총 처리", value=f"{total}명", inline=True)
-    embed.add_field(name="성공", value=f"{len([r for r in all_results if r.get('success')])}명", inline=True)
-    embed.add_field(name="실패", value=f"{len([r for r in all_results if not r.get('success')])}명", inline=True)
-    
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    success_cnt = len([r for r in all_results if r.get("success")])
+    fail_cnt = len([r for r in all_results if not r.get("success")])
+
+    summary = make_bulk_rank_summary_embed(
+        RankSummaryType.BULK_PROMOTE,
+        role_name=role_name,
+        total=total,
+        success=success_cnt,
+        failed=fail_cnt,
+        executor=interaction.user,
+    )
+    await interaction.followup.send(embed=summary, ephemeral=True)
+
+    # 선택: 그룹변경 로그 채널에도 요약 남기기
+    log_ch_id = get_log_channel(interaction.guild.id, "group_change")
+    if log_ch_id:
+        ch = interaction.guild.get_channel(log_ch_id) or await interaction.guild.fetch_channel(log_ch_id)
+        if ch:
+            await ch.send(embed=summary)
+
+@bot.tree.command(name="일괄강등", description="인증된 모든 유저를 특정 역할로 변경합니다. (관리자)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.describe(role_name="변경할 그룹 역할 이름 또는 숫자")
+async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    if not RANK_API_URL_ROOT or not RANK_API_KEY:
+        await interaction.response.send_message(
+            "랭킹 서버 설정이 되어 있지 않습니다.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    cursor.execute(
+        "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
+        (interaction.guild.id,),
+    )
+    verified_users = [row[0] for row in cursor.fetchall() if row[0]]
+
+    cursor.execute(
+        "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
+        (interaction.guild.id,),
+    )
+    forced_excluded = {row[0] for row in cursor.fetchall() if row[0]}
+
+    all_users = [u for u in verified_users if u not in forced_excluded]
+
+    if not all_users:
+        await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
+        return
+
+    total = len(all_users)
+
+    if total > 1000:
+        await interaction.followup.send(
+            f"{total}명 처리 예정 (약 {total // 60}분 소요)\n처리 시작합니다...",
+            ephemeral=True,
+        )
+
+    BATCH_SIZE = 100
+    all_results: list[dict] = []
+
+    for i in range(0, total, BATCH_SIZE):
+        batch = all_users[i:i + BATCH_SIZE]
+
+        try:
+            payload = {"usernames": batch, "rank": role_name}
+            resp = requests.post(
+                f"{RANK_API_URL_ROOT}/bulk-demote-to-role",
+                json=payload,
+                headers=_rank_api_headers(),
+                timeout=120,
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                all_results.extend(data.get("results", []))
+
+            if (i + BATCH_SIZE) % 1000 == 0:
+                await interaction.followup.send(
+                    f"진행 중... {min(i + BATCH_SIZE, total)}/{total}명",
+                    ephemeral=True,
+                )
+
+            await asyncio.sleep(1)
+
+        except Exception as e:
+            print(f"Batch {i} error: {e}")
+            continue
+
+    success_cnt = len([r for r in all_results if r.get("success")])
+    fail_cnt = len([r for r in all_results if not r.get("success")])
+
+    summary = make_bulk_rank_summary_embed(
+        RankSummaryType.BULK_DEMOTE,
+        role_name=role_name,
+        total=total,
+        success=success_cnt,
+        failed=fail_cnt,
+        executor=interaction.user,
+    )
+    await interaction.followup.send(embed=summary, ephemeral=True)
+
+    # 선택: 그룹변경 로그 채널에도 요약 남기기
+    log_ch_id = get_log_channel(interaction.guild.id, "group_change")
+    if log_ch_id:
+        ch = interaction.guild.get_channel(log_ch_id) or await interaction.guild.fetch_channel(log_ch_id)
+        if ch:
+            await ch.send(embed=summary)
+
 
 @bot.tree.command(name="강제인증해제", description="유저의 인증을 해제합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -1134,91 +1490,7 @@ async def unverify_user(interaction: discord.Interaction, user: discord.User):
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="일괄강등", description="인증된 모든 유저를 특정 역할로 변경합니다. (관리자)")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-@app_commands.describe(role_name="변경할 그룹 역할 이름 또는 숫자")
-async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
-        return
-
-    if not RANK_API_URL_ROOT or not RANK_API_KEY:
-        await interaction.response.send_message(
-            "랭킹 서버 설정이 되어 있지 않습니다.", ephemeral=True
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True)
-    
-    cursor.execute(
-        "SELECT roblox_nick FROM users WHERE guild_id=? AND verified=1",
-        (interaction.guild.id,),
-    )
-    verified_users = [row[0] for row in cursor.fetchall() if row[0]]
-
-    cursor.execute(
-        "SELECT roblox_nick FROM forced_verified WHERE guild_id=?",
-        (interaction.guild.id,),
-    )
-    forced_excluded = set([row[0] for row in cursor.fetchall() if row[0]])
-
-    all_users = [u for u in verified_users if u not in forced_excluded]
-
-    if not all_users:
-        await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
-        return
-
-    total = len(all_users)
-    
-    # 대량 처리 경고
-    if total > 1000:
-        await interaction.followup.send(
-            f"{total}명 처리 예정 (약 {total // 60}분 소요)\n처리 시작합니다...",
-            ephemeral=True
-        )
-
-    BATCH_SIZE = 100
-    all_results = []
-    
-    for i in range(0, total, BATCH_SIZE):
-        batch = all_users[i:i + BATCH_SIZE]
-        
-        try:
-            payload = {"usernames": batch, "rank": role_name}
-            resp = requests.post(
-                f"{RANK_API_URL_ROOT}/bulk-demote-to-role",
-                json=payload,
-                headers=_rank_api_headers(),
-                timeout=120,
-            )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                all_results.extend(data.get("results", []))
-            
-            # 진행 상황 업데이트 (1000명마다)
-            if (i + BATCH_SIZE) % 1000 == 0:
-                await interaction.followup.send(
-                    f"진행 중... {i + BATCH_SIZE}/{total}명",
-                    ephemeral=True
-                )
-            
-            # Rate limit 방지
-            import asyncio
-            await asyncio.sleep(1)
-            
-        except Exception as e:
-            print(f"Batch {i} error: {e}")
-            continue
-
-    # 최종 결과
-    embed = discord.Embed(title="일괄 강등 완료", color=discord.Color.red())
-    embed.add_field(name="총 처리", value=f"{total}명", inline=True)
-    embed.add_field(name="성공", value=f"{len([r for r in all_results if r.get('success')])}명", inline=True)
-    embed.add_field(name="실패", value=f"{len([r for r in all_results if not r.get('success')])}명", inline=True)
-    
-    await interaction.followup.send(embed=embed, ephemeral=True)
-
+ 
 @bot.tree.command(name="동기화", description="슬래시 명령어를 다시 동기화합니다. (관리자)")
 async def sync_commands(interaction: discord.Interaction):
     if not is_admin(interaction.user):
@@ -1482,6 +1754,63 @@ async def bulk_nickname_change(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
+
+@bot.tree.command(name="로그채널지정", description="로그 채널을 설정합니다. (관리자)")
+@app_commands.describe(
+    인증="인증 로그 채널",
+    그룹변경="그룹변경 로그 채널",
+    관리자="관리자 로그 채널",
+    보안="보안 로그 채널",
+    개발자="개발자 로그 채널",
+)
+async def set_log_channels(
+    interaction: discord.Interaction,
+    인증: discord.TextChannel | None = None,
+    그룹변경: discord.TextChannel | None = None,
+    관리자: discord.TextChannel | None = None,
+    보안: discord.TextChannel | None = None,
+    개발자: discord.TextChannel | None = None,
+):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    changed: list[str] = []
+
+    if 인증 is not None:
+        set_log_channel(guild.id, "verify", 인증.id)
+        changed.append(f"인증: {인증.mention}")
+
+    if 그룹변경 is not None:
+        set_log_channel(guild.id, "group_change", 그룹변경.id)
+        changed.append(f"그룹변경: {그룹변경.mention}")
+
+    if 관리자 is not None:
+        set_log_channel(guild.id, "admin", 관리자.id)
+        changed.append(f"관리자: {관리자.mention}")
+
+    if 보안 is not None:
+        set_log_channel(guild.id, "security", 보안.id)
+        changed.append(f"보안: {보안.mention}")
+
+    if 개발자 is not None:
+        set_log_channel(guild.id, "dev", 개발자.id)
+        changed.append(f"개발자: {개발자.mention}")
+
+    if not changed:
+        await interaction.response.send_message(
+            "변경된 채널이 없습니다. 최소 한 개 이상 지정해 주세요.",
+            ephemeral=True,
+        )
+        return
+
+    msg = "다음 로그 채널이 설정되었습니다:\n" + "\n".join(changed)
+    await interaction.response.send_message(msg, ephemeral=True)
 
 @bot.tree.command(name="블랙리스트", description="블랙리스트 그룹을 관리합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))

@@ -16,6 +16,55 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import requests
 
+LOG_API_URL = "http://127.0.0.1:8001/api/log"  # 나중에 Railway 올리면 URL만 바꾸면 됨
+
+def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str) -> None:
+    import requests
+    try:
+        payload = {
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "action": action,
+            "detail": detail,
+        }
+        requests.post(LOG_API_URL, json=payload, timeout=3)
+    except Exception:
+        # 웹 죽어 있어도 봇은 멈추면 안 되니까 조용히 무시
+        pass
+
+
+# ---------- Postgres 테이블 생성 ----------
+
+pg_cur.execute("""
+CREATE TABLE IF NOT EXISTS users(
+    discord_id     BIGINT,
+    guild_id       BIGINT,
+    roblox_nick    TEXT,
+    roblox_user_id BIGINT,
+    code           TEXT,
+    expire_time    TIMESTAMPTZ,
+    verified       INTEGER DEFAULT 0,
+    PRIMARY KEY(discord_id, guild_id)
+)
+""")
+
+pg_cur.execute("""
+CREATE TABLE IF NOT EXISTS stats(
+    guild_id     BIGINT PRIMARY KEY,
+    verify_count INTEGER DEFAULT 0,
+    force_count  INTEGER DEFAULT 0,
+    cancel_count INTEGER DEFAULT 0
+)
+""")
+
+pg_cur.execute("""
+CREATE TABLE IF NOT EXISTS blacklist(
+    guild_id BIGINT,
+    group_id BIGINT,
+    PRIMARY KEY(guild_id, group_id)
+)
+""")
+
 # ---------- 기본 설정 ----------
 
 intents = discord.Intents.default()
@@ -197,14 +246,23 @@ def check_is_officer(rank_num: int, rank_name: str) -> tuple[bool, bool]:
     
     return (is_junior, is_senior)
 
+LOG_DIR = os.environ.get("LOG_DIR", "/app/logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
 def save_verification_log(discord_nick: str, roblox_nick: str):
-    """인증 성공 시 로그 파일에 기록"""
+    """인증 성공 시 로그 파일에 기록 + 콘솔에 같이 출력"""
     log_file = os.path.join(LOG_DIR, "verification_log.txt")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] [{discord_nick}]: [{roblox_nick}]"
 
     try:
+        # 파일에 저장 (Volume용)
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] [{discord_nick}]: [{roblox_nick}]\n")
+            f.write(line + "\n")
+
+        # Deploy Logs 에도 출력
+        print("[VERIFY_LOG]", line)
+        print("/인증 로블닉:{}")
     except Exception as e:
         print(f"로그 저장 실패: {e}")
 
@@ -571,6 +629,15 @@ class VerifyView(discord.ui.View):
             except Exception as e:
                 print(f"로그 기록 실패: {e}")
 
+            # 예시: VerifyView.verify_button 안에서 인증 최종 성공한 시점
+            # (역할 부여, 닉변 다 끝났고, embed로 성공 메시지 보내는 부분 바로 위나 아래)
+            # 예: 성공 처리 직전에 추가
+            send_log_to_web(
+                guild_id=interaction.guild.id,
+                user_id=interaction.user.id,
+                action="verify_success",
+                detail=nick  # 또는 f"{nick} ({robloxuserid})" 이런 식으로
+            )
 
             if not interaction.response.is_done():
                 await interaction.response.send_message("인증 완료!", ephemeral=True)
@@ -588,6 +655,12 @@ class VerifyView(discord.ui.View):
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):
     await interaction.response.defer(ephemeral=True)
+
+   # ★ /인증 명령 로그
+    print(
+        f"/인증 로블닉:{로블닉}"
+        f"(user={interaction.user} id={interaction.user.id})"
+    )
 
     cursor.execute(
         "SELECT verified FROM users WHERE discord_id=? AND guild_id=?",
@@ -1321,6 +1394,12 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
         title="강제인증 완료",
         color=discord.Color.green(),
         description=f"{user.mention} 을(를) {roblox_nick}로 인증 처리했습니다.\nDiscord 닉: `{new_nick}`"
+    )
+    send_log_to_web(
+        guild_id=interaction.guild.id,
+        user_id=user.id,
+        action="force_verify",
+        detail=roblox_nick
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 

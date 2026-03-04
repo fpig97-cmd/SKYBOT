@@ -2711,113 +2711,104 @@ async def rank_log_task():
 @rank_log_task.before_loop
 async def before_rank_log_task():
     await bot.wait_until_ready()
-# 🔒 새로 초대될 때
+
 @bot.event
 async def on_guild_join(guild: discord.Guild):
-    if guild.id != ALLOWED_GUILD_ID:
-        await force_leave(guild)
-    else:
-        await notify_dev(guild)
 
+    now_kst = datetime.now(KST)
 
-# ==========================
-# 허용 서버 DM
-# ==========================
-async def notify_dev(guild):
-    dev = bot.get_user(DEVELOPER_ID)
-    if not dev:
+    # =========================
+    # ✅ 허용 서버
+    # =========================
+    if guild.id == ALLOWED_GUILD_ID:
+        dev = await bot.fetch_user(DEVELOPER_ID)
+        embed = discord.Embed(
+            title="✅ 허용 서버 연결",
+            description=(
+                f"서버 이름: {guild.name}\n"
+                f"서버 ID: {guild.id}\n"
+                f"인원수: {guild.member_count}"
+            ),
+            color=discord.Color.green(),
+            timestamp=now_kst
+        )
+        await dev.send(embed=embed)
         return
 
-    now_kst = datetime.now(KST)
+    # =========================
+    # 🔥 멤버 로딩
+    # =========================
+    await guild.chunk()
 
-    embed = discord.Embed(
-        title="✅ Allowed Server Connected",
-        description=(
-            f"Server: {guild.name}\n"
-            f"ID: {guild.id}\n"
-            f"Members: {guild.member_count}"
-        ),
-        color=discord.Color.green(),
-        timestamp=now_kst
-    )
-    embed.set_footer(
-        text="Security System • Made By Lunar | KST (UTC+9, 한국표준시)"
-    )
+    allowed_guild = bot.get_guild(ALLOWED_GUILD_ID)
+    if allowed_guild:
+        await allowed_guild.chunk()
 
-    await dev.send(embed=embed)
+    # =========================
+    # 🔎 교집합 유저 찾기
+    # =========================
+    shared_members = []
 
+    if allowed_guild:
+        allowed_ids = {m.id for m in allowed_guild.members}
+        for member in guild.members:
+            if member.id in allowed_ids:
+                shared_members.append(member)
 
-# ==========================
-# 강제 탈퇴 + 로그
-# ==========================
-async def force_leave(guild: discord.Guild):
-
-    now_kst = datetime.now(KST)
-
-    try:
-        # 서버 주인
-        owner = guild.owner
-        owner_text = f"{owner} ({owner.id})" if owner else "Unknown"
-
-        # 생성일
-        created_text = guild.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
-
-        # 초대한 유저
-        inviter = "Unknown"
+    # =========================
+    # 📩 교집합 유저 DM
+    # =========================
+    for member in shared_members:
         try:
-            async for entry in guild.audit_logs(
-                limit=5,
-                action=discord.AuditLogAction.bot_add
-            ):
-                if entry.target.id == bot.user.id:
-                    inviter = f"{entry.user} ({entry.user.id})"
-                    break
+            user = await bot.fetch_user(member.id)
+            await user.send(
+                f"⚠️ 경고: 당신은 허용되지 않은 서버 '{guild.name}'에 있습니다.\n"
+                "보안 시스템에 의해 기록되었습니다."
+            )
         except:
-            inviter = "Audit Log Permission Missing"
+            pass
 
-        # 멤버 목록 파일
-        member_file = discord.File(
-            io.BytesIO(
-                "\n".join(
-                    f"{m} ({m.id})" for m in guild.members
-                ).encode("utf-8")
+    # =========================
+    # 📄 멤버 목록 파일 생성
+    # =========================
+    member_lines = [f"{m} ({m.id})" for m in guild.members]
+    buffer = io.BytesIO("\n".join(member_lines).encode("utf-8"))
+    member_file = discord.File(buffer, filename=f"{guild.id}_members.txt")
+
+    # =========================
+    # 🚨 보안 로그 임베드
+    # =========================
+    owner = guild.owner
+    owner_text = f"{owner} ({owner.id})" if owner else "알 수 없음"
+    created_text = guild.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+    log_channel = bot.get_channel(SECURITY_LOG_CHANNEL_ID)
+
+    if log_channel:
+        embed = discord.Embed(
+            title="🚨 비허용 서버 감지",
+            description=(
+                f"서버 이름: {guild.name}\n"
+                f"서버 ID: {guild.id}\n"
+                f"인원수: {guild.member_count}\n"
+                f"서버 주인: {owner_text}\n"
+                f"생성일(KST): {created_text}\n"
+                f"교집합 인원: {len(shared_members)}명\n\n"
+                "봇이 즉시 서버를 떠납니다."
             ),
-            filename=f"{guild.id}_members.txt"
+            color=discord.Color.red(),
+            timestamp=now_kst
         )
 
-        log_channel = bot.get_channel(SECURITY_LOG_CHANNEL_ID)
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
 
-        if log_channel:
-            embed = discord.Embed(
-                title="🚨 Unauthorized Server Detected",
-                description=(
-                    f"Server: {guild.name}\n"
-                    f"ID: {guild.id}\n"
-                    f"Members: {guild.member_count}\n"
-                    f"Owner: {owner_text}\n"
-                    f"Created (KST): {created_text}\n"
-                    f"Invited By: {inviter}\n\n"
-                    "Bot will leave immediately."
-                ),
-                color=discord.Color.red(),
-                timestamp=now_kst
-            )
+        await log_channel.send(embed=embed, file=member_file)
 
-            if guild.icon:
-                embed.set_thumbnail(url=guild.icon.url)
-
-            embed.set_footer(
-                text="Security System • Made By Lunar | KST (UTC+9, 한국표준시)"
-            )
-
-            await log_channel.send(embed=embed, file=member_file)
-
-    except Exception as e:
-        print("Security logging failed:", e)
-
-    finally:
-        # 무조건 탈퇴
-        await guild.leave()
+    # =========================
+    # ❌ 서버 탈퇴
+    # =========================
+    await guild.leave()
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():

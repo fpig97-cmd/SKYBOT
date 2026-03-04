@@ -2821,29 +2821,32 @@ async def force_leave(guild: discord.Guild):
 @bot.event
 async def on_ready():
 
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+
+    # 🔒 시작 시 서버 강제 검사
+    for guild in bot.guilds:
+        if guild.id != ALLOWED_GUILD_ID:
+            print(f"Unauthorized guild found on startup: {guild.name}")
+            await force_leave(guild)
+
     try:
-        # GUILD_ID 서버 먼저 동기화
         if GUILD_ID > 0:
-            guild = discord.Object(id=GUILD_ID)
-            synced_guild = await bot.tree.sync(guild=guild)
-            print(f"Synced {len(synced_guild)} commands to guild {GUILD_ID} (즉시 적용)")
-        
-        # 전역 동기화
-        synced_global = await bot.tree.sync()
-        print(f"Synced {len(synced_global)} commands globally (15분 후 적용)")
-        
+            guild_obj = discord.Object(id=GUILD_ID)
+            await bot.tree.sync(guild=guild_obj)
+
+        await bot.tree.sync()
+
     except Exception as e:
         print("동기화 실패:", e)
-    
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    
-    # 태스크 시작
+
     if not rank_log_task.is_running():
         rank_log_task.start()
-    
-    # ✅ 새로운 태스크 시작
+
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
 
+    if not officer_role_sync_task.is_running():
+        officer_role_sync_task.start()
+        
 if __name__ == "__main__":
     bot.run(TOKEN)

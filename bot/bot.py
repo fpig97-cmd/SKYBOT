@@ -18,6 +18,11 @@ import requests
 from datetime import datetime
 from enum import Enum
 
+
+VERIFY_ROLE_ID = 1478714261160202280      # 🟢 인증자 역할 ID
+UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
+ADMIN_LOG_CHANNEL_ID = 1468191799855026208 # 📋 관리자 로그 채널 ID
+
 API_BASE = "https://web-api-production-69fc.up.railway.app"
 
 def is_already_verified(guild_id: int, user_id: int) -> bool:
@@ -41,6 +46,7 @@ def is_already_verified(guild_id: int, user_id: int) -> bool:
     except Exception as e:
         print("[WEB_CHECK_EXCEPTION]", repr(e))
         return False
+
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨
 
@@ -261,10 +267,12 @@ def set_guild_group_id(guild_id: int, group_id: int) -> None:
     )
     conn.commit()
 
+
 def get_guild_role_id(guild_id: int) -> Optional[int]:
     cursor.execute("SELECT role_id FROM settings WHERE guild_id=?", (guild_id,))
     row = cursor.fetchone()
     return row[0] if row else None
+
 
 def set_guild_role_id(guild_id: int, role_id: int) -> None:
     cursor.execute(
@@ -317,6 +325,7 @@ def get_guild_admin_role_ids(guild_id: int) -> list[int]:
     except Exception:
         return []
 
+
 def set_guild_admin_role_ids(guild_id: int, role_ids: list[int]) -> None:
     import json
 
@@ -331,10 +340,12 @@ def set_guild_admin_role_ids(guild_id: int, role_ids: list[int]) -> None:
     )
     conn.commit()
 
+
 def is_owner(user: discord.abc.User | discord.Member) -> bool:
     if OWNER_ID <= 0:
         return False
     return int(user.id) == int(OWNER_ID)
+
 
 def is_admin(member: discord.Member) -> bool:
     # 1) 제작자
@@ -374,6 +385,7 @@ def add_error_log(error_msg: str) -> None:
     if len(error_logs) > MAX_LOGS:
         error_logs.pop(0)
 
+
 def generate_code() -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
@@ -381,6 +393,7 @@ def generate_code() -> str:
 
 ROBLOX_USERNAME_API = "https://users.roblox.com/v1/usernames/users"
 ROBLOX_USER_API = "https://users.roblox.com/v1/users/{userId}"
+
 
 async def roblox_get_user_id_by_username(username: str) -> Optional[int]:
     payload = {"usernames": [username], "excludeBannedUsers": True}
@@ -457,6 +470,7 @@ def set_officer_role_id(guild_id: int, role_id: int) -> None:
     )
     conn.commit()
 
+
 # ---------- 인증 View ----------
 
 class VerifyView(discord.ui.View):
@@ -482,6 +496,7 @@ def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str):
         print("[WEB_LOG]", resp.status_code, resp.text)
     except Exception as e:
         print("[WEB_LOG_ERROR]", repr(e))
+
 
 class VerifyView(discord.ui.View):
     def __init__(
@@ -545,146 +560,139 @@ class VerifyView(discord.ui.View):
                         ephemeral=True,
                     )
                 return
-# 3) 역할 부여
 
-# 1️⃣ 설정에서 가져오는 역할
-config_role_id = get_guild_role_id(guild.id)
+            # 3) 역할 부여 + 관리자 로그
+            # 1️⃣ 설정에서 가져오는 역할 (필요하면 VERIFY_ROLE_ID 대신 쓸 수 있음)
+            config_role_id = get_guild_role_id(guild.id)
 
-VERIFY_ROLE_ID = 1478714261160202280      # 🟢 인증자 역할 ID
-UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
-ADMIN_LOG_CHANNEL_ID = 1468191799855026208 # 📋 관리자 로그 채널 ID
-# =========================
-# 3) 역할 부여 + 관리자 로그
-# =========================
 
-from datetime import datetime, timezone, timedelta
+            KST = timezone(timedelta(hours=9))
+            now_kst = datetime.now(KST)
 
-KST = timezone(timedelta(hours=9))
-now_kst = datetime.now(KST)
+            member = guild.get_member(interaction.user.id)
+            if member is None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "서버에서 회원 정보를 찾을 수 없습니다.",
+                        ephemeral=True,
+                    )
+                return
 
-member = guild.get_member(interaction.user.id)
-if member is None:
-    if not interaction.response.is_done():
-        await interaction.response.send_message(
-            "서버에서 회원 정보를 찾을 수 없습니다.",
-            ephemeral=True,
-        )
-    return
+            verify_role = guild.get_role(VERIFY_ROLE_ID)
+            unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
+            log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID)
 
-verify_role = guild.get_role(VERIFY_ROLE_ID)
-unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
-log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID)
+            if verify_role is None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "인증 역할을 찾을 수 없습니다. 관리자에게 문의해 주세요.",
+                        ephemeral=True,
+                    )
+                return
 
-if verify_role is None:
-    return
+            # 이미 인증된 경우 중복 방지
+            if verify_role in member.roles:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "이미 인증된 상태입니다.",
+                        ephemeral=True,
+                    )
+                return
 
-# 이미 인증된 경우 중복 방지
-if verify_role in member.roles:
-    if not interaction.response.is_done():
-        await interaction.response.send_message(
-            "이미 인증된 상태입니다.",
-            ephemeral=True,
-        )
-    return
+            account_created = member.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
 
-account_created = member.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+            # 🔴 기존 역할 제거
+            if unverify_role and unverify_role in member.roles:
+                await member.remove_roles(unverify_role)
 
-# =========================
-# 🔴 기존 역할 제거
-# =========================
-if unverify_role and unverify_role in member.roles:
-    await member.remove_roles(unverify_role)
+                if log_channel:
+                    embed_remove = discord.Embed(
+                        title="🔴 역할 제거",
+                        color=discord.Color.red(),
+                        timestamp=now_kst
+                    )
 
-    if log_channel:
-        embed_remove = discord.Embed(
-            title="🔴 역할 제거",
-            color=discord.Color.red(),
-            timestamp=now_kst
-        )
+                    if guild.icon:
+                        embed_remove.set_thumbnail(url=guild.icon.url)
 
-        if guild.icon:
-            embed_remove.set_thumbnail(url=guild.icon.url)
+                    embed_remove.add_field(
+                        name="디스코드",
+                        value=(
+                            f"{member.mention}\n"
+                            f"{member.name}\n"
+                            f"ID: {member.id}\n"
+                            f"계정 생성일: {account_created}"
+                        ),
+                        inline=False
+                    )
 
-        embed_remove.add_field(
-            name="디스코드",
-            value=(
-                f"{member.mention}\n"
-                f"{member.name}\n"
-                f"ID: {member.id}\n"
-                f"계정 생성일: {account_created}"
-            ),
-            inline=False
-        )
+                    embed_remove.add_field(
+                        name="로블록스",
+                        value=f"{self.roblox_nick}",
+                        inline=False
+                    )
 
-        embed_remove.add_field(
-            name="로블록스",
-            value=f"{self.roblox_nick}",
-            inline=False
-        )
+                    embed_remove.add_field(
+                        name="역할",
+                        value=f"{unverify_role.mention}",
+                        inline=False
+                    )
 
-        embed_remove.add_field(
-            name="역할",
-            value=f"{unverify_role.mention}",
-            inline=False
-        )
+                    embed_remove.add_field(
+                        name="실행자",
+                        value=f"{interaction.user.mention}",
+                        inline=False
+                    )
 
-        embed_remove.add_field(
-            name="실행자",
-            value=f"{interaction.user.mention}",
-            inline=False
-        )
+                    embed_remove.set_footer(text="Made by Lunar | KST(UTC+9)")
 
-        embed_remove.set_footer(text="Made by Lunar | KST(UTC+9)")
+                    await log_channel.send(embed=embed_remove)
 
-        await log_channel.send(embed=embed_remove)
+            # 🟢 인증 역할 추가
+            await member.add_roles(verify_role)
 
-# =========================
-# 🟢 인증 역할 추가
-# =========================
-await member.add_roles(verify_role)
+            if log_channel:
+                embed_add = discord.Embed(
+                    title="🟢 역할 추가",
+                    color=discord.Color.green(),
+                    timestamp=now_kst
+                )
 
-if log_channel:
-    embed_add = discord.Embed(
-        title="🟢 역할 추가",
-        color=discord.Color.green(),
-        timestamp=now_kst
-    )
+                if guild.icon:
+                    embed_add.set_thumbnail(url=guild.icon.url)
 
-    if guild.icon:
-        embed_add.set_thumbnail(url=guild.icon.url)
+                embed_add.add_field(
+                    name="디스코드",
+                    value=(
+                        f"{member.mention}\n"
+                        f"{member.name}\n"
+                        f"ID: {member.id}\n"
+                        f"계정 생성일: {account_created}"
+                    ),
+                    inline=False
+                )
 
-    embed_add.add_field(
-        name="디스코드",
-        value=(
-            f"{member.mention}\n"
-            f"{member.name}\n"
-            f"ID: {member.id}\n"
-            f"계정 생성일: {account_created}"
-        ),
-        inline=False
-    )
+                embed_add.add_field(
+                    name="로블록스",
+                    value=f"{self.roblox_nick}",
+                    inline=False
+                )
 
-    embed_add.add_field(
-        name="로블록스",
-        value=f"{self.roblox_nick}",
-        inline=False
-    )
+                embed_add.add_field(
+                    name="역할",
+                    value=f"{verify_role.mention}",
+                    inline=False
+                )
 
-    embed_add.add_field(
-        name="역할",
-        value=f"{verify_role.mention}",
-        inline=False
-    )
+                embed_add.add_field(
+                    name="실행자",
+                    value=f"{interaction.user.mention}",
+                    inline=False
+                )
 
-    embed_add.add_field(
-        name="실행자",
-        value=f"{interaction.user.mention}",
-        inline=False
-    )
+                embed_add.set_footer(text="Made by Lunar | KST(UTC+9)")
 
-    embed_add.set_footer(text="Made by Lunar | KST(UTC+9)")
-
-    await log_channel.send(embed=embed_add)
+                await log_channel.send(embed=embed_add)
 
             # 4) (선택) 랭크 API로 닉네임 변경
             rankname = "?"
@@ -759,6 +767,7 @@ if log_channel:
                     "인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
                     ephemeral=True,
                 )
+
 # ---------- 클래스 ----------
 class VerifyLogType(str, Enum):
     REQUEST = "request"
@@ -928,6 +937,7 @@ def make_bulk_rank_summary_embed(
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):
     await interaction.response.defer(ephemeral=True)
+
 
     print(
         f"/인증 로블닉:{로블닉} "
@@ -1311,6 +1321,7 @@ async def promote_cmd(
     except Exception as e:
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
 
+
 @bot.tree.command(name="강등", description="Roblox 그룹 랭크를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(
     username="Roblox 본닉",
@@ -1382,6 +1393,7 @@ async def demote_to_role_cmd(
             )
     except Exception as e:
         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True)
+
 
 @bot.tree.command(name="일괄승진", description="인증된 모든 유저를 특정 역할로 승진합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -1570,6 +1582,7 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
         if ch:
             await ch.send(embed=summary)
 
+
 @bot.tree.command(name="강제인증해제", description="유저의 인증을 해제합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(user="인증 해제할 Discord 유저")
@@ -1706,11 +1719,6 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
                 role_info = results[0].get("role", {})
                 rank_name = role_info.get("name", "?")
                 rank_num = role_info.get("rank", 0)
-                if " | " in rank_name:
-                    rank_name = rank_name.split(" | ")[-1]
-                    newnick = f"[{rank_name}] {roblox_nick}"
-                if len(newnick) > 32:
-                    newnick = newnick[:32]
         
         # Discord 닉네임 변경
         new_nick = f"[{rank_name}] {roblox_nick}"
@@ -2056,7 +2064,7 @@ async def set_all_role(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@bot.tree.command(name="장교역할설정", description="장교 (영관급 ~ 장성급) 에게 부여할 역할을 설정합니다. (관리자)")
+@bot.tree.command(name="장교역할", description="장교 (영관급 ~ 장성급) 에게 부여할 역할을 설정합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(role="영관급 장교 역할")
 async def set_senior_officer_role(interaction: discord.Interaction, role: discord.Role):
@@ -2154,15 +2162,13 @@ async def update_user(
     member = interaction.guild.get_member(user.id)
     if member:
         try:
-            if " | " in rank_name:
-                rank_name = rank_name.split(" | ")[-1]
-                new_nick = f"[{rank_name}] {roblox_nick}"
+            new_nick = f"[{rank_name}]"
 
-                if len(new_nick) > 32:
-                    new_nick = new_nick[:32]
+            # 닉네임 길이 제한 (32자)
+            if len(new_nick) > 32:
+                new_nick = new_nick[:32]
 
             await member.edit(nick=new_nick)
-
         except Exception as e:
             print(f"닉네임 변경 실패: {e}")
 
@@ -2192,6 +2198,7 @@ async def update_user(
                         await member.remove_roles(senior_officer_role)
                 except:
                     pass
+
 
     # 6. 결과 응답
     embed = discord.Embed(
@@ -2278,6 +2285,7 @@ async def sync_all_nicknames_task():
         
     except Exception as e:
         print(f"sync_all_nicknames_task error: {e}")
+
 
 @sync_all_nicknames_task.before_loop
 async def before_sync_all_nicknames_task():
@@ -2377,6 +2385,7 @@ async def officer_role_sync_task():
 
     except Exception as e:
         print(f"officer_role_sync_task error: {e}")
+
 
 @officer_role_sync_task.before_loop
 async def before_officer_role_sync_task():
@@ -2546,100 +2555,13 @@ async def rank_log_task():
     except Exception as e:
         print(f"rank_log_task error: {e}")
 
+
 @rank_log_task.before_loop
 async def before_rank_log_task():
     await bot.wait_until_ready()
 
     
 
-TARGET_CUSTOM_EMOJI_IDS = [
-    1471826252989071482,
-    1471875175791464643,
-    1471826069857243331,
-    1471826479754117264,
-    1471825935027408987  # 감지할 커스텀 이모지 ID
-]
-
-ALLOWED_ROLE_IDS = [
-    111111111111111111
-]
-
-ALLOWED_USER_IDS = [
-    794811652620156949,
-    1185946251171217519,
-    1468191965052141629,
-    1206574701380636692
-]
-
-TIMEOUT_DURATION = timedelta(days=1)
-LOG_CHANNEL_ID = 1468191965052141629
-# ==========================================
-
-def contains_target_custom_emoji(message: discord.Message):
-    if not message.guild:
-        return False
-
-    for emoji in message.guild.emojis:
-        if emoji.id in TARGET_CUSTOM_EMOJI_IDS:
-            if str(emoji) in message.content:
-                return True
-    return False
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-
-    # 🎯 커스텀 이모지 감지
-    if contains_target_custom_emoji(message):
-
-        # 🔓 허용 유저
-        if message.author.id in ALLOWED_USER_IDS:
-            return
-
-        # 🔓 허용 역할
-        user_role_ids = [role.id for role in message.author.roles]
-        if any(role_id in ALLOWED_ROLE_IDS for role_id in user_role_ids):
-            return
-
-        try:
-            # ⏰ 종료 시간 계산
-            timeout_until = datetime.now(timezone.utc) + TIMEOUT_DURATION
-            unix_timestamp = int(timeout_until.timestamp())
-
-            # 🔒 타임아웃
-            await message.author.timeout(
-                TIMEOUT_DURATION,
-                reason="관인 남용"
-            )
-
-            # 📦 Embed
-            embed = discord.Embed(
-                description=(
-                    "> ⛔ 타임아웃 안내\n"
-                    f"> 대상자 : {message.author.mention}\n"
-                    "> 사유 : 관인 남용\n"
-                    f"> 기간 : 1일 후 <t:{unix_timestamp}:F>"
-                ),
-                color=0xED4245
-            )
-
-            now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            embed.set_footer(
-                text=f"Made By Lunar • {now_time}"
-            )
-
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                await log_channel.send(embed=embed)
-
-        except discord.Forbidden:
-            print("권한 부족")
-        except Exception as e:
-            print("오류:", e)
-
-    await bot.process_commands(message)
-    
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():

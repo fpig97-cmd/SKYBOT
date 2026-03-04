@@ -545,36 +545,57 @@ class VerifyView(discord.ui.View):
                         ephemeral=True,
                     )
                 return
+# 3) 역할 부여
 
-            # 3) 역할 부여
-            roleid = get_guild_role_id(guild.id)
-            if not roleid:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "서버에 인증 역할이 설정되어 있지 않습니다. 관리자에게 문의해 주세요.",
-                        ephemeral=True,
-                    )
-                return
+# 1️⃣ 설정에서 가져오는 역할
+config_role_id = get_guild_role_id(guild.id)
 
-            role = guild.get_role(roleid)
-            if role is None:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "서버에서 인증 역할을 찾을 수 없습니다. 관리자에게 문의해 주세요.",
-                        ephemeral=True,
-                    )
-                return
+# 2️⃣ 상수 역할 (고정 역할 ID)
+CONST_ROLE_ID = 1478714261160202280  # ← 여기 네가 넣을 역할 ID
 
-            member = guild.get_member(interaction.user.id)
-            if member is None:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "서버에서 회원 정보를 찾을 수 없습니다. 다시 시도해 주세요.",
-                        ephemeral=True,
-                    )
-                return
+role_ids = []
 
-            await member.add_roles(role)
+# 설정 역할 추가
+if config_role_id:
+    role_ids.append(config_role_id)
+
+# 상수 역할 추가
+role_ids.append(CONST_ROLE_ID)
+
+if not role_ids:
+    if not interaction.response.is_done():
+        await interaction.response.send_message(
+            "서버에 인증 역할이 설정되어 있지 않습니다.",
+            ephemeral=True,
+        )
+    return
+
+member = guild.get_member(interaction.user.id)
+if member is None:
+    if not interaction.response.is_done():
+        await interaction.response.send_message(
+            "서버에서 회원 정보를 찾을 수 없습니다. 다시 시도해 주세요.",
+            ephemeral=True,
+        )
+    return
+
+# 실제 Role 객체로 변환
+roles_to_add = []
+for rid in role_ids:
+    role = guild.get_role(rid)
+    if role:
+        roles_to_add.append(role)
+
+if not roles_to_add:
+    if not interaction.response.is_done():
+        await interaction.response.send_message(
+            "부여할 역할을 서버에서 찾을 수 없습니다.",
+            ephemeral=True,
+        )
+    return
+
+# ✅ 여러 역할 한번에 부여
+await member.add_roles(*roles_to_add)
 
             # 4) (선택) 랭크 API로 닉네임 변경
             rankname = "?"

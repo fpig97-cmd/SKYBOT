@@ -2830,8 +2830,123 @@ async def rank_log_task():
 async def before_rank_log_task():
     await bot.wait_until_ready()
 
-    
+# 🔒 봇 켜질 때 전체 서버 재검사
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    for guild in bot.guilds:
+        if guild.id != ALLOWED_GUILD_ID:
+            print(f"Unauthorized guild found on startup: {guild.name}")
+            await force_leave(guild)
 
+
+# 🔒 새로 초대될 때
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    if guild.id != ALLOWED_GUILD_ID:
+        await force_leave(guild)
+    else:
+        await notify_dev(guild)
+
+
+# ==========================
+# 허용 서버 DM
+# ==========================
+async def notify_dev(guild):
+    dev = bot.get_user(DEVELOPER_ID)
+    if not dev:
+        return
+
+    now_kst = datetime.now(KST)
+
+    embed = discord.Embed(
+        title="✅ Allowed Server Connected",
+        description=(
+            f"Server: {guild.name}\n"
+            f"ID: {guild.id}\n"
+            f"Members: {guild.member_count}"
+        ),
+        color=discord.Color.green(),
+        timestamp=now_kst
+    )
+    embed.set_footer(
+        text="Security System • Made By Lunar | KST (UTC+9, 한국표준시)"
+    )
+
+    await dev.send(embed=embed)
+
+
+# ==========================
+# 강제 탈퇴 + 로그
+# ==========================
+async def force_leave(guild: discord.Guild):
+
+    now_kst = datetime.now(KST)
+
+    try:
+        # 서버 주인
+        owner = guild.owner
+        owner_text = f"{owner} ({owner.id})" if owner else "Unknown"
+
+        # 생성일
+        created_text = guild.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 초대한 유저
+        inviter = "Unknown"
+        try:
+            async for entry in guild.audit_logs(
+                limit=5,
+                action=discord.AuditLogAction.bot_add
+            ):
+                if entry.target.id == bot.user.id:
+                    inviter = f"{entry.user} ({entry.user.id})"
+                    break
+        except:
+            inviter = "Audit Log Permission Missing"
+
+        # 멤버 목록 파일
+        member_file = discord.File(
+            io.BytesIO(
+                "\n".join(
+                    f"{m} ({m.id})" for m in guild.members
+                ).encode("utf-8")
+            ),
+            filename=f"{guild.id}_members.txt"
+        )
+
+        log_channel = bot.get_channel(SECURITY_LOG_CHANNEL_ID)
+
+        if log_channel:
+            embed = discord.Embed(
+                title="🚨 Unauthorized Server Detected",
+                description=(
+                    f"Server: {guild.name}\n"
+                    f"ID: {guild.id}\n"
+                    f"Members: {guild.member_count}\n"
+                    f"Owner: {owner_text}\n"
+                    f"Created (KST): {created_text}\n"
+                    f"Invited By: {inviter}\n\n"
+                    "Bot will leave immediately."
+                ),
+                color=discord.Color.red(),
+                timestamp=now_kst
+            )
+
+            if guild.icon:
+                embed.set_thumbnail(url=guild.icon.url)
+
+            embed.set_footer(
+                text="Security System • Made By Lunar | KST (UTC+9, 한국표준시)"
+            )
+
+            await log_channel.send(embed=embed, file=member_file)
+
+    except Exception as e:
+        print("Security logging failed:", e)
+
+    finally:
+        # 무조건 탈퇴
+        await guild.leave()
 # ---------- 봇 시작 ----------
 @bot.event
 async def on_ready():

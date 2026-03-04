@@ -1077,6 +1077,70 @@ async def verify_stats(interaction: discord.Interaction):
     # ----- 한 번에 여러 Embed 전송 -----
     await interaction.followup.send(embeds=embeds_to_send, ephemeral=True)
 
+@bot.tree.command(name="전체미인증", description="서버 모든 인원에게 미인증 역할을 부여합니다. (관리자/제작자)")
+async def add_unverify_to_all(interaction: discord.Interaction):
+    # 제작자 또는 관리자만
+    if not (is_owner(interaction.user) or is_admin(interaction.user)):
+        await interaction.response.send_message(
+            "관리자 또는 제작자만 사용할 수 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message(
+            "길드에서만 사용할 수 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
+    if unverify_role is None:
+        await interaction.followup.send(
+            "UNVERIFY_ROLE_ID 에 해당하는 역할을 찾을 수 없습니다.",
+            ephemeral=True,
+        )
+        return
+
+    success = 0
+    failed = 0
+    skipped = 0
+
+    for member in guild.members:
+        # 봇은 스킵
+        if member.bot:
+            skipped += 1
+            continue
+
+        # 봇보다 위에 있는 유저는 스킵 (권한 문제 방지)
+        if guild.me.top_role <= member.top_role:
+            skipped += 1
+            continue
+
+        # 이미 미인증 역할 있으면 스킵
+        if unverify_role in member.roles:
+            skipped += 1
+            continue
+
+        try:
+            await member.add_roles(unverify_role, reason="전체 미인증 처리")
+            success += 1
+        except Exception as e:
+            print(f"[ADD_UNVERIFY_ERROR] {member} {e}")
+            failed += 1
+
+    msg = (
+        f"🔴 전체 미인증 처리 완료\n"
+        f"추가 성공: {success}명\n"
+        f"실패: {failed}명\n"
+        f"스킵: {skipped}명"
+    )
+    await interaction.followup.send(msg, ephemeral=True)
+
+
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):

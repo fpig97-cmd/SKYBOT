@@ -2354,6 +2354,131 @@ async def update_user(
     embed.add_field(name="새 Discord 닉네임", value=f"[{rank_name}]", inline=True)
 
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+ALLOWED_GUILD_ID = 1461636782176075830
+SECURITY_LOG_CHANNEL_ID = 1468191965052141629
+DEVELOPER_ID = 1276176866440642561
+
+KST = timezone(timedelta(hours=9))
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+
+    now_kst = datetime.now(KST)
+
+    # =========================
+    # 허용 서버
+    # =========================
+    if guild.id == ALLOWED_GUILD_ID:
+        dev = bot.get_user(DEVELOPER_ID)
+        if dev:
+            embed = discord.Embed(
+                title="✅ Allowed Server Connected",
+                description=(
+                    f"**Server Name:** {guild.name}\n"
+                    f"**Server ID:** `{guild.id}`\n"
+                    f"**Member Count:** {guild.member_count}"
+                ),
+                color=discord.Color.green(),
+                timestamp=now_kst
+            )
+            embed.set_footer(
+                text="Bot Security System • Made By Lunar | KST (UTC+9, 한국표준시)"
+            )
+            await dev.send(embed=embed)
+        return
+
+    # =========================
+    # 허용되지 않은 서버
+    # =========================
+
+    # 서버 주인
+    owner = guild.owner
+    owner_text = f"{owner} ({owner.id})" if owner else "Unknown"
+
+    # 서버 생성일
+    created_at_kst = guild.created_at.astimezone(KST)
+    created_text = created_at_kst.strftime("%Y-%m-%d %H:%M:%S")
+
+    # 초대한 유저 조회
+    inviter = "Unknown"
+    try:
+        async for entry in guild.audit_logs(
+            limit=5,
+            action=discord.AuditLogAction.bot_add
+        ):
+            if entry.target.id == bot.user.id:
+                inviter = f"{entry.user} ({entry.user.id})"
+                break
+    except:
+        inviter = "Audit Log Permission Missing"
+
+    # 허용 서버 객체 가져오기
+    allowed_guild = bot.get_guild(ALLOWED_GUILD_ID)
+
+    # 교집합 유저 찾기
+    shared_members = []
+    if allowed_guild:
+        allowed_member_ids = {m.id for m in allowed_guild.members}
+        for member in guild.members:
+            if member.id in allowed_member_ids:
+                shared_members.append(member)
+
+    # 교집합 유저에게 DM
+    for member in shared_members:
+        try:
+            await member.send(
+                f"⚠️ 경고: 당신은 허용되지 않은 서버 '{guild.name}'에 있습니다.\n"
+                "보안 시스템에 의해 기록되었습니다."
+            )
+        except:
+            pass  # DM 막혀있을 수 있음
+
+    # 전체 멤버 목록 파일 생성
+    member_lines = [
+        f"{m} ({m.id})"
+        for m in guild.members
+    ]
+
+    member_file = discord.File(
+        io.BytesIO("\n".join(member_lines).encode("utf-8")),
+        filename=f"{guild.id}_members.txt"
+    )
+
+    # 보안 로그 채널
+    log_channel = bot.get_channel(SECURITY_LOG_CHANNEL_ID)
+
+    if log_channel:
+        embed = discord.Embed(
+            title="🚨 Unauthorized Server Detected",
+            description=(
+                f"**Server Name:** {guild.name}\n"
+                f"**Server ID:** `{guild.id}`\n"
+                f"**Member Count:** {guild.member_count}\n"
+                f"**Server Owner:** {owner_text}\n"
+                f"**Created At (KST):** {created_text}\n"
+                f"**Invited By:** {inviter}\n"
+                f"**Shared Members:** {len(shared_members)}명\n\n"
+                "Member list file attached.\n"
+                "Bot will now leave the server."
+            ),
+            color=discord.Color.red(),
+            timestamp=now_kst
+        )
+
+        # 서버 아이콘 표시
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+
+        embed.set_footer(
+            text="Bot Security System • Made By Lunar | KST (UTC+9, 한국표준시)"
+        )
+
+        await log_channel.send(embed=embed, file=member_file)
+
+    # 서버 탈퇴
+    await guild.leave()
     
 @tasks.loop(hours=6)
 async def sync_all_nicknames_task():

@@ -1779,20 +1779,20 @@ async def unverify_user(interaction: discord.Interaction, user: discord.User):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
  
-@bot.tree.command(name="동기화", description="슬래시 명령어를 다시 동기화합니다. (관리자)")
+@bot.tree.command(name="동기화", description="슬래시 명령어를 동기화합니다.")
 async def sync_commands(interaction: discord.Interaction):
     if not is_admin(interaction.user):
-        await interaction.response.send_message("관리자만 사용 가능합니다.", ephemeral=True)
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
     try:
         if interaction.guild:
-            await bot.tree.sync(guild=interaction.guild)
-            msg = f"{interaction.guild.name}({interaction.guild.id}) 에서 슬래시 명령 동기화 완료"
+            synced = await bot.tree.sync(guild=interaction.guild)
+            msg = f"{interaction.guild.name}({interaction.guild.id}) 길드에 {len(synced)}개 명령어 동기화 완료"
         else:
-            await bot.tree.sync()
-            msg = "글로벌 슬래시 명령 동기화 완료"
+            synced = await bot.tree.sync()
+            msg = f"전역에 {len(synced)}개 명령어 동기화 완료"
 
         await interaction.followup.send(msg, ephemeral=True)
     except Exception as e:

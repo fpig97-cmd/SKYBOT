@@ -550,52 +550,141 @@ class VerifyView(discord.ui.View):
 # 1️⃣ 설정에서 가져오는 역할
 config_role_id = get_guild_role_id(guild.id)
 
-# 2️⃣ 상수 역할 (고정 역할 ID)
-CONST_ROLE_ID = 1478714261160202280  # ← 여기 네가 넣을 역할 ID
+VERIFY_ROLE_ID = 1478714261160202280      # 🟢 인증자 역할 ID
+UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
+ADMIN_LOG_CHANNEL_ID = 1468191799855026208 # 📋 관리자 로그 채널 ID
+# =========================
+# 3) 역할 부여 + 관리자 로그
+# =========================
 
-role_ids = []
+from datetime import datetime, timezone, timedelta
 
-# 설정 역할 추가
-if config_role_id:
-    role_ids.append(config_role_id)
-
-# 상수 역할 추가
-role_ids.append(CONST_ROLE_ID)
-
-if not role_ids:
-    if not interaction.response.is_done():
-        await interaction.response.send_message(
-            "서버에 인증 역할이 설정되어 있지 않습니다.",
-            ephemeral=True,
-        )
-    return
+KST = timezone(timedelta(hours=9))
+now_kst = datetime.now(KST)
 
 member = guild.get_member(interaction.user.id)
 if member is None:
     if not interaction.response.is_done():
         await interaction.response.send_message(
-            "서버에서 회원 정보를 찾을 수 없습니다. 다시 시도해 주세요.",
+            "서버에서 회원 정보를 찾을 수 없습니다.",
             ephemeral=True,
         )
     return
 
-# 실제 Role 객체로 변환
-roles_to_add = []
-for rid in role_ids:
-    role = guild.get_role(rid)
-    if role:
-        roles_to_add.append(role)
+verify_role = guild.get_role(VERIFY_ROLE_ID)
+unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
+log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID)
 
-if not roles_to_add:
+if verify_role is None:
+    return
+
+# 이미 인증된 경우 중복 방지
+if verify_role in member.roles:
     if not interaction.response.is_done():
         await interaction.response.send_message(
-            "부여할 역할을 서버에서 찾을 수 없습니다.",
+            "이미 인증된 상태입니다.",
             ephemeral=True,
         )
     return
 
-# ✅ 여러 역할 한번에 부여
-await member.add_roles(*roles_to_add)
+account_created = member.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+
+# =========================
+# 🔴 기존 역할 제거
+# =========================
+if unverify_role and unverify_role in member.roles:
+    await member.remove_roles(unverify_role)
+
+    if log_channel:
+        embed_remove = discord.Embed(
+            title="🔴 역할 제거",
+            color=discord.Color.red(),
+            timestamp=now_kst
+        )
+
+        if guild.icon:
+            embed_remove.set_thumbnail(url=guild.icon.url)
+
+        embed_remove.add_field(
+            name="디스코드",
+            value=(
+                f"{member.mention}\n"
+                f"{member.name}\n"
+                f"ID: {member.id}\n"
+                f"계정 생성일: {account_created}"
+            ),
+            inline=False
+        )
+
+        embed_remove.add_field(
+            name="로블록스",
+            value=f"{self.roblox_nick}",
+            inline=False
+        )
+
+        embed_remove.add_field(
+            name="역할",
+            value=f"{unverify_role.mention}",
+            inline=False
+        )
+
+        embed_remove.add_field(
+            name="실행자",
+            value=f"{interaction.user.mention}",
+            inline=False
+        )
+
+        embed_remove.set_footer(text="Made by Lunar | KST(UTC+9)")
+
+        await log_channel.send(embed=embed_remove)
+
+# =========================
+# 🟢 인증 역할 추가
+# =========================
+await member.add_roles(verify_role)
+
+if log_channel:
+    embed_add = discord.Embed(
+        title="🟢 역할 추가",
+        color=discord.Color.green(),
+        timestamp=now_kst
+    )
+
+    if guild.icon:
+        embed_add.set_thumbnail(url=guild.icon.url)
+
+    embed_add.add_field(
+        name="디스코드",
+        value=(
+            f"{member.mention}\n"
+            f"{member.name}\n"
+            f"ID: {member.id}\n"
+            f"계정 생성일: {account_created}"
+        ),
+        inline=False
+    )
+
+    embed_add.add_field(
+        name="로블록스",
+        value=f"{self.roblox_nick}",
+        inline=False
+    )
+
+    embed_add.add_field(
+        name="역할",
+        value=f"{verify_role.mention}",
+        inline=False
+    )
+
+    embed_add.add_field(
+        name="실행자",
+        value=f"{interaction.user.mention}",
+        inline=False
+    )
+
+    embed_add.set_footer(text="Made by Lunar | KST(UTC+9)")
+
+    await log_channel.send(embed=embed_add)
 
             # 4) (선택) 랭크 API로 닉네임 변경
             rankname = "?"

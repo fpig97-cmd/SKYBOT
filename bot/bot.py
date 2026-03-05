@@ -973,7 +973,7 @@ async def verify_stats(interaction: discord.Interaction):
 
     def pct(part: int, whole: int) -> float:
         if whole == 0:
-            #return 0.0
+            return 0.0
         return round(part / whole * 100, 2)
 
     verified_pct = pct(verified_count, total_members)

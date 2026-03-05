@@ -1024,7 +1024,7 @@ async def verify_stats(interaction: discord.Interaction):
 
     # ----------------- 메인 통계 Embed -----------------
     main_embed = discord.Embed(
-        title="📊 인증 통계 (API 기준)",
+        title="📊 인증 통계",
         color=discord.Color.blurple(),
         timestamp=datetime.now(timezone.utc),
     )
@@ -2808,7 +2808,7 @@ async def on_guild_join(guild: discord.Guild):
     # ❌ 서버 탈퇴
     # =========================
     await guild.leave()
-    
+
 # ---------- 봇 시작 ----------
 # 🔒 허가되지 않은 길드 강제 탈퇴 함수
 async def force_leave(guild: discord.Guild) -> None:

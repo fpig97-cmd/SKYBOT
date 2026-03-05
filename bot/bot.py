@@ -953,7 +953,7 @@ async def verify_stats(interaction: discord.Interaction):
         return
 
     await interaction.response.defer(ephemeral=True)
-    ----- 기본 통계 계산 -----
+    # ----- 기본 통계 계산 -----
     members = [m for m in guild.members if not m.bot]
     total_members = len(members)
 

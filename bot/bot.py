@@ -20,7 +20,7 @@ from datetime import datetime
 from enum import Enum
 
 
-VERIFY_ROLE_ID = 1478714261160202280      # 🟢 인증자 역할 ID
+VERIFY_ROLE_ID = 1461636782176075831      # 🟢 인증자 역할 ID
 UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
 ADMIN_LOG_CHANNEL_ID = 1468191799855026208 # 📋 관리자 로그 채널 ID
 
@@ -939,54 +939,61 @@ async def verify_stats(interaction: discord.Interaction):
     guild = interaction.guild
     if not guild:
         await interaction.response.send_message(
-            "길드에서만 사용 가능합니다.", ephemeral=True
+            "길드에서만 사용 가능합니다.",
+            ephemeral=True,
         )
         return
 
     member = interaction.user
     if not (is_owner(member) or is_admin(member)):
         await interaction.response.send_message(
-            "관리자 또는 제작자만 사용할 수 있습니다.", ephemeral=True
+            "관리자 또는 제작자만 사용할 수 있습니다.",
+            ephemeral=True,
         )
         return
 
     await interaction.response.defer(ephemeral=True)
 
-    # ----------------- 1️⃣ 서버 멤버 가져오기 -----------------
+    # ----------------- 서버 멤버 가져오기 -----------------
     members: list[discord.Member] = [m for m in guild.members if not m.bot]
 
-    # ----------------- 2️⃣ API 체크 (인증 여부) -----------------
-    verified_ids = set()
+    # ----------------- API 체크 (인증 여부) -----------------
+    verified_ids: set[int] = set()
     loop = asyncio.get_running_loop()
 
+    def _check_one(user_id: int) -> bool:
+        # sync 함수는 run_in_executor 안에서만 호출
+        return is_already_verified(guild.id, user_id)
+
     async def check_verified(m: discord.Member):
-        is_verified = await loop.run_in_executor(None, is_already_verified, guild.id, m.id)
+        is_verified = await loop.run_in_executor(None, _check_one, m.id)
         if is_verified:
             verified_ids.add(m.id)
 
-    await asyncio.gather((check_verified(m) for m in members))
+    # 여러 코루틴을 한 번에 실행
+    await asyncio.gather(*(check_verified(m) for m in members))
 
-    # ----------------- 3️⃣ 멤버 객체 기준으로 분류 -----------------
+    # ----------------- 멤버 객체 기준으로 분류 -----------------
     verified_members = [m for m in members if m.id in verified_ids]
     not_verified_members = [m for m in members if m.id not in verified_ids]
 
     total_members = len(members)
     verified_count = len(verified_members)
     not_verified_count = len(not_verified_members)
+
     verified_pct = round(verified_count / total_members * 100, 2) if total_members else 0
     not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0
 
-    # ----------------- 4️⃣ Embed Chunking -----------------
+    # ----------------- Embed Chunking -----------------
     def chunk_lines(title: str, members_list: list[discord.Member], emoji: str):
         if not members_list:
             return []
 
-        # Member 객체 기준으로 멘션
         lines = [f"- {m.mention}" for m in members_list]
         text = "\n".join(lines)
-
         MAX_LEN = 1900
-        chunks = []
+        chunks: list[str] = []
+
         while text:
             if len(text) <= MAX_LEN:
                 chunks.append(text)
@@ -997,51 +1004,79 @@ async def verify_stats(interaction: discord.Interaction):
             chunks.append(text[:cut])
             text = text[cut:].lstrip("\n")
 
-        embeds = []
+        embeds: list[discord.Embed] = []
         total = len(members_list)
+
         for idx, chunk_text in enumerate(chunks, start=1):
             e = discord.Embed(
                 title=f"{emoji} {title} ({idx}/{len(chunks)})",
-                description=f"{'✅ 인증자' if emoji=='🟢' else '❌ 미인증자'} ({total}명)\n{chunk_text}",
+                description=(
+                    f"{'✅ 인증자' if emoji == '🟢' else '❌ 미인증자'} "
+                    f"({total}명)\n{chunk_text}"
+                ),
                 color=discord.Color.green() if emoji == "🟢" else discord.Color.red(),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             e.set_footer(text=f"Made By Lunar | 총 {total}명")
             embeds.append(e)
+
         return embeds
 
-    # ----------------- 5️⃣ 메인 통계 Embed -----------------
+    # ----------------- 메인 통계 Embed -----------------
     main_embed = discord.Embed(
         title="📊 인증 통계 (API 기준)",
         color=discord.Color.blurple(),
         timestamp=datetime.now(timezone.utc),
     )
     main_embed.add_field(name="서버 인원수", value=f"{total_members}명", inline=False)
-    main_embed.add_field(name="✅ 인증", value=f"{verified_count}명 ({verified_pct}%)", inline=True)
-    main_embed.add_field(name="❌ 미인증", value=f"{not_verified_count}명 ({not_verified_pct}%)", inline=True)
-    main_embed.add_field(name="합계", value=f"{verified_count + not_verified_count}명", inline=False)
+    main_embed.add_field(
+        name="✅ 인증",
+        value=f"{verified_count}명 ({verified_pct}%)",
+        inline=True,
+    )
+    main_embed.add_field(
+        name="❌ 미인증",
+        value=f"{not_verified_count}명 ({not_verified_pct}%)",
+        inline=True,
+    )
+    main_embed.add_field(
+        name="합계",
+        value=f"{verified_count + not_verified_count}명",
+        inline=False,
+    )
 
-    embeds_to_send = [main_embed]
+    embeds_to_send: list[discord.Embed] = [main_embed]
     embeds_to_send += chunk_lines("인증자", verified_members, "🟢")
     embeds_to_send += chunk_lines("미인증자", not_verified_members, "🔴")
 
-    # ----------------- 6️⃣ 페이지네이션 버튼 -----------------
+    # ----------------- 페이지네이션 버튼 -----------------
     class Pages(discord.ui.View):
-        def init(self, embeds):
-            super().init(timeout=None)
+        def __init__(self, embeds: list[discord.Embed]):
+            super().__init__(timeout=None)
             self.embeds = embeds
             self.current = 0
-    @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.grey)
-    async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.grey)
+        async def prev(self, interaction2: discord.Interaction, button: discord.ui.Button):
             self.current = (self.current - 1) % len(self.embeds)
-            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+            await interaction2.response.edit_message(
+                embed=self.embeds[self.current],
+                view=self,
+            )
 
-    @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.grey)
-    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.grey)
+        async def next(self, interaction2: discord.Interaction, button: discord.ui.Button):
             self.current = (self.current + 1) % len(self.embeds)
-            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+            await interaction2.response.edit_message(
+                embed=self.embeds[self.current],
+                view=self,
+            )
 
-    await interaction.followup.send(embed=embeds_to_send[0], view=Pages(embeds_to_send), ephemeral=True)
+    await interaction.followup.send(
+        embed=embeds_to_send[0],
+        view=Pages(embeds_to_send),
+        ephemeral=True,
+    )
 
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
@@ -2773,10 +2808,19 @@ async def on_guild_join(guild: discord.Guild):
     # ❌ 서버 탈퇴
     # =========================
     await guild.leave()
+    
 # ---------- 봇 시작 ----------
+# 🔒 허가되지 않은 길드 강제 탈퇴 함수
+async def force_leave(guild: discord.Guild) -> None:
+    """허가되지 않은 길드에서 나가고 로그 남김."""
+    try:
+        print(f"[FORCE_LEAVE] Leaving unauthorized guild: {guild.name} ({guild.id})")
+        await guild.leave()
+    except Exception as e:
+        print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}")
+
 @bot.event
 async def on_ready():
-
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
     # 🔒 시작 시 서버 강제 검사
@@ -2785,24 +2829,24 @@ async def on_ready():
             print(f"Unauthorized guild found on startup: {guild.name}")
             await force_leave(guild)
 
+    # 슬래시 커맨드 동기화
     try:
         if GUILD_ID > 0:
             guild_obj = discord.Object(id=GUILD_ID)
             await bot.tree.sync(guild=guild_obj)
-
         await bot.tree.sync()
-
     except Exception as e:
         print("동기화 실패:", e)
 
+    # 백그라운드 태스크 시작
     if not rank_log_task.is_running():
         rank_log_task.start()
 
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
-
     if not officer_role_sync_task.is_running():
         officer_role_sync_task.start()
-        
+
 if __name__ == "__main__":
     bot.run(TOKEN)
+

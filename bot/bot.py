@@ -952,10 +952,10 @@ async def verify_stats(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    # ----- 봇 제외 모든 멤버 가져오기 -----
+    # ----------------- 1️⃣ 서버 멤버 가져오기 -----------------
     members: list[discord.Member] = [m for m in guild.members if not m.bot]
 
-    # ----- API 체크: 인증된 멤버 ID만 set으로 저장 -----
+    # ----------------- 2️⃣ API 체크 (인증 여부) -----------------
     verified_ids = set()
     loop = asyncio.get_running_loop()
 
@@ -964,9 +964,9 @@ async def verify_stats(interaction: discord.Interaction):
         if is_verified:
             verified_ids.add(m.id)
 
-    await asyncio.gather(*(check_verified(m) for m in members))
+    await asyncio.gather((check_verified(m) for m in members))
 
-    # ----- 멤버 객체 기준으로 분류 -----
+    # ----------------- 3️⃣ 멤버 객체 기준으로 분류 -----------------
     verified_members = [m for m in members if m.id in verified_ids]
     not_verified_members = [m for m in members if m.id not in verified_ids]
 
@@ -976,16 +976,13 @@ async def verify_stats(interaction: discord.Interaction):
     verified_pct = round(verified_count / total_members * 100, 2) if total_members else 0
     not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0
 
-    # ----- 멘션 함수 -----
-    def mention_member(m: discord.Member):
-        return m.mention  # Member 객체 그대로 쓰기 때문에 멘션 완전히 정상
-
-    # ----- Embed chunking -----
+    # ----------------- 4️⃣ Embed Chunking -----------------
     def chunk_lines(title: str, members_list: list[discord.Member], emoji: str):
         if not members_list:
             return []
 
-        lines = [f"- {mention_member(m)}" for m in members_list]
+        # Member 객체 기준으로 멘션
+        lines = [f"- {m.mention}" for m in members_list]
         text = "\n".join(lines)
 
         MAX_LEN = 1900
@@ -1005,7 +1002,7 @@ async def verify_stats(interaction: discord.Interaction):
         for idx, chunk_text in enumerate(chunks, start=1):
             e = discord.Embed(
                 title=f"{emoji} {title} ({idx}/{len(chunks)})",
-                description=f"**{'✅ 인증자' if emoji=='🟢' else '❌ 미인증자'} ({total}명)**\n{chunk_text}",
+                description=f"{'✅ 인증자' if emoji=='🟢' else '❌ 미인증자'} ({total}명)\n{chunk_text}",
                 color=discord.Color.green() if emoji == "🟢" else discord.Color.red(),
                 timestamp=datetime.now(timezone.utc)
             )
@@ -1013,7 +1010,7 @@ async def verify_stats(interaction: discord.Interaction):
             embeds.append(e)
         return embeds
 
-    # ----- 메인 통계 Embed -----
+    # ----------------- 5️⃣ 메인 통계 Embed -----------------
     main_embed = discord.Embed(
         title="📊 인증 통계 (API 기준)",
         color=discord.Color.blurple(),
@@ -1028,20 +1025,19 @@ async def verify_stats(interaction: discord.Interaction):
     embeds_to_send += chunk_lines("인증자", verified_members, "🟢")
     embeds_to_send += chunk_lines("미인증자", not_verified_members, "🔴")
 
-    # ----- 페이지네이션 버튼 -----
+    # ----------------- 6️⃣ 페이지네이션 버튼 -----------------
     class Pages(discord.ui.View):
-        def __init__(self, embeds):
-            super().__init__(timeout=None)
+        def init(self, embeds):
+            super().init(timeout=None)
             self.embeds = embeds
             self.current = 0
-
-        @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.grey)
-        async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.grey)
+    async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
             self.current = (self.current - 1) % len(self.embeds)
             await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
 
-        @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.grey)
-        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.grey)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
             self.current = (self.current + 1) % len(self.embeds)
             await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
 

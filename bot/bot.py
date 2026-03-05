@@ -982,7 +982,12 @@ async def verify_stats(interaction: discord.Interaction):
         if not members_list:
             return []
 
-        lines = [f"- {m.mention} (`{m.id}`)" for m in members_list]
+        # 멘션이 안 될 경우 <@id> 형식으로 처리
+        lines = [
+            f"- {m.mention if isinstance(m, discord.Member) else f'<@{m}>'} "
+            f"(`{m.id if isinstance(m, discord.Member) else m}`)"
+            for m in members_list
+        ]
         text = "\n".join(lines)
         chunks = []
         MAX_LEN = 1900

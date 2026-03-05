@@ -936,148 +936,114 @@ def make_bulk_rank_summary_embed(
 
 @bot.tree.command(name="인증통계", description="서버 인증 통계를 보여줍니다.")
 async def verify_stats(interaction: discord.Interaction):
-    # 제작자 또는 관리자만 사용 가능
-    if not (is_owner(interaction.user) or is_admin(interaction.user)):
+    guild = interaction.guild
+    if not guild:
         await interaction.response.send_message(
-            "관리자 또는 제작자만 사용할 수 있습니다.",
-            ephemeral=True,
+            "길드에서만 사용 가능합니다.", ephemeral=True
         )
         return
 
-    guild = interaction.guild
-    if guild is None:
+    member = interaction.user
+    if not (is_owner(member) or is_admin(member)):
         await interaction.response.send_message(
-            "길드에서만 사용할 수 있습니다.",
-            ephemeral=True,
+            "관리자 또는 제작자만 사용할 수 있습니다.", ephemeral=True
         )
         return
 
     await interaction.response.defer(ephemeral=True)
-    # ----- 기본 통계 계산 -----
+
     members = [m for m in guild.members if not m.bot]
+
+    verified_members = []
+    not_verified_members = []
+
+    # ----- 병렬 API 요청 -----
+    async def check_member(m: discord.Member):
+        loop = asyncio.get_running_loop()
+        return m, await loop.run_in_executor(None, is_already_verified, guild.id, m.id)
+
+    tasks = [check_member(m) for m in members]
+    results = await asyncio.gather(*tasks)
+
+    for m, verified in results:
+        if verified:
+            verified_members.append(m)
+        else:
+            not_verified_members.append(m)
+
     total_members = len(members)
-
-    verify_role = guild.get_role(VERIFY_ROLE_ID)
-    unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
-
-    verified_members = [m for m in members if verify_role and verify_role in m.roles]
-
-    not_verified_set = set()
-    for m in members:
-        if verify_role and verify_role in m.roles:
-            continue
-        not_verified_set.add(m)
-
     verified_count = len(verified_members)
-    not_verified_count = len(not_verified_set)
+    not_verified_count = len(not_verified_members)
+    verified_pct = round(verified_count / total_members * 100, 2) if total_members else 0
+    not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0
 
-    def pct(part: int, whole: int) -> float:
-        if whole == 0:
-            return 0.0
-        return round(part / whole * 100, 2)
-
-    verified_pct = pct(verified_count, total_members)
-    not_verified_pct = pct(not_verified_count, total_members)
-
-    # ----- 메인 통계 Embed -----
-    main_embed = discord.Embed(
-        title="📊 인증 통계",
-        color=discord.Color.blurple(),
-        timestamp=datetime.now(timezone.utc),
-    )
-    main_embed.add_field(
-        name="서버 인원수",
-        value=f"{total_members}명",
-        inline=False,
-    )
-    main_embed.add_field(
-        name="✅ 인증",
-        value=f"{verified_count}명 ({verified_pct}%)",
-        inline=True,
-    )
-    main_embed.add_field(
-        name="❌ 미인증",
-        value=f"{not_verified_count}명 ({not_verified_pct}%)",
-        inline=True,
-    )
-    main_embed.add_field(
-        name="합계",
-        value=f"{verified_count + not_verified_count}명",
-        inline=False,
-    )
-
-    embeds_to_send: list[discord.Embed] = [main_embed]
-
-    # ----- 역할별 유저 목록을 여러 Embed로 분할 -----
-    def chunk_lines(title: str, members_list: list[discord.Member], emoji: str) -> list[discord.Embed]:
+    # ----- Embed chunking 함수 -----
+    def chunk_lines(title: str, members_list: list[discord.Member], emoji: str):
         if not members_list:
             return []
 
-        # 목록 텍스트
-        lines = []
-        for m in members_list:
-            lines.append(f"- {m.mention} (`{m.id}`)")
-
+        lines = [f"- {m.mention} (`{m.id}`)" for m in members_list]
         text = "\n".join(lines)
-        max_len = 1900
-        chunks: list[str] = []
+        chunks = []
+        MAX_LEN = 1900
+
         while text:
-            if len(text) <= max_len:
+            if len(text) <= MAX_LEN:
                 chunks.append(text)
                 break
-            cut = text.rfind("\n", 0, max_len)
+            cut = text.rfind("\n", 0, MAX_LEN)
             if cut == -1:
-                cut = max_len
+                cut = MAX_LEN
             chunks.append(text[:cut])
             text = text[cut:].lstrip("\n")
 
-        embeds: list[discord.Embed] = []
+        embeds = []
         total = len(members_list)
-        
         for idx, chunk_text in enumerate(chunks, start=1):
-            # 제목: 인증자 / 미인증자 + 역할 이름
-            embed_title = f"{emoji} {title} 목록 ({idx}/{len(chunks)})"
             e = discord.Embed(
-                title=embed_title,
-                color=discord.Color.green() if emoji == "🟢" else discord.Color.red(),
-                timestamp=datetime.now(timezone.utc),
+                title=f"{emoji} {title} ({idx}/{len(chunks)})",
+                description=f"**{'✅ 인증자' if emoji=='🟢' else '❌ 미인증자'} ({total}명)**\n{chunk_text}",
+                color=discord.Color.green() if emoji=='🟢' else discord.Color.red(),
+                timestamp=datetime.now(timezone.utc)
             )
-            # 상단에 큰 제목 느낌으로 “인증자 / 미인증자”
-    
-            if emoji == "🟢":
-                header = f"✅ 인증자 ({total}명)"
-            else:
-                header = f"❌ 미인증자 ({total}명)"
-
-            e.description = f"**{header}**\n{chunk_text}"
             e.set_footer(text=f"Made By Lunar | 총 {total}명")
             embeds.append(e)
-
         return embeds
 
-    if verify_role:
-        vr_members = [m for m in members if verify_role in m.roles]
-        embeds_to_send.extend(
-            chunk_lines(f"인증자 - {verify_role.name}", vr_members, "🟢")
-        )
+    # ----- 메인 통계 Embed -----
+    main_embed = discord.Embed(
+        title="📊 인증 통계 (API 기준)",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc),
+    )
+    main_embed.add_field(name="서버 인원수", value=f"{total_members}명", inline=False)
+    main_embed.add_field(name="✅ 인증", value=f"{verified_count}명 ({verified_pct}%)", inline=True)
+    main_embed.add_field(name="❌ 미인증", value=f"{not_verified_count}명 ({not_verified_pct}%)", inline=True)
+    main_embed.add_field(name="합계", value=f"{verified_count + not_verified_count}명", inline=False)
 
-    if unverify_role:
-        ur_members = [m for m in members if unverify_role in m.roles]
-        embeds_to_send.extend(
-            chunk_lines(f"미인증자 - {unverify_role.name}", ur_members, "🔴")
-        )
+    embeds_to_send = [main_embed]
+    embeds_to_send += chunk_lines("인증자", verified_members, "🟢")
+    embeds_to_send += chunk_lines("미인증자", not_verified_members, "🔴")
 
-    if len(embeds_to_send) == 1:
-        # 역할 가진 유저가 아무도 없을 때
-        main_embed.add_field(
-            name="역할별 유저 목록",
-            value="해당 역할을 가진 유저가 없습니다.",
-            inline=False,
-        )
+    # ----- 페이지네이션 버튼 -----
+    class Pages(discord.ui.View):
+        def __init__(self, embeds):
+            super().__init__(timeout=None)
+            self.embeds = embeds
+            self.current = 0
 
-    # ----- 한 번에 여러 Embed 전송 -----
-    await interaction.followup.send(embeds=embeds_to_send, ephemeral=True)
+        @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.grey)
+        async def prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current = (self.current - 1) % len(self.embeds)
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
 
+        @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.grey)
+        async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+            self.current = (self.current + 1) % len(self.embeds)
+            await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
+
+    await interaction.followup.send(embed=embeds_to_send[0], view=Pages(embeds_to_send), ephemeral=True)
+    
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):

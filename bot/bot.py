@@ -952,15 +952,19 @@ async def verify_stats(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    members = [m for m in guild.members if not m.bot]
+    # ----- 모든 멤버 가져오기 (캐시가 없으면 강제로 가져오기) -----
+    members: list[discord.Member] = []
+    for m in guild.members:
+        if not m.bot:
+            real_member = guild.get_member(m.id) or m
+            members.append(real_member)
 
-    verified_members = []
-    not_verified_members = []
+    verified_members: list[discord.Member] = []
+    not_verified_members: list[discord.Member] = []
 
     # ----- 병렬 API 요청 -----
     async def check_member(m: discord.Member):
         loop = asyncio.get_running_loop()
-        # Member 객체는 그대로 반환
         verified = await loop.run_in_executor(None, is_already_verified, guild.id, m.id)
         return m, verified
 
@@ -979,17 +983,20 @@ async def verify_stats(interaction: discord.Interaction):
     verified_pct = round(verified_count / total_members * 100, 2) if total_members else 0
     not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0
 
+    # ----- 멘션 함수 -----
+    def mention(m):
+        return f"<@{m.id if isinstance(m, discord.Member) else m}>"
+
     # ----- Embed chunking 함수 -----
     def chunk_lines(title: str, members_list: list[discord.Member], emoji: str):
         if not members_list:
             return []
 
-        # 항상 Member 객체로 처리되므로 m.mention 사용 가능
-        lines = [f"- {m.mention} (`{m.id}`)" for m in members_list]
+        lines = [f"- {mention(m)} (`{m.id if isinstance(m, discord.Member) else m}`)" for m in members_list]
         text = "\n".join(lines)
-        chunks = []
-        MAX_LEN = 1900
 
+        MAX_LEN = 1900
+        chunks = []
         while text:
             if len(text) <= MAX_LEN:
                 chunks.append(text)

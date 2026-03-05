@@ -952,21 +952,17 @@ async def verify_stats(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    # ----- 모든 멤버 가져오기 (캐시가 없으면 강제로 가져오기) -----
-    members: list[discord.Member] = []
-    for m in guild.members:
-        if not m.bot:
-            real_member = guild.get_member(m.id) or m
-            members.append(real_member)
+    # ----- 봇이 아닌 모든 멤버 가져오기 -----
+    members: list[discord.Member] = [m for m in guild.members if not m.bot]
 
     verified_members: list[discord.Member] = []
     not_verified_members: list[discord.Member] = []
 
-    # ----- 병렬 API 요청 -----
+    # ----- API 확인을 비동기 병렬로 실행 -----
     async def check_member(m: discord.Member):
         loop = asyncio.get_running_loop()
         verified = await loop.run_in_executor(None, is_already_verified, guild.id, m.id)
-        return m, verified
+        return m, verified  # ✅ 항상 Member 객체 반환
 
     tasks = [check_member(m) for m in members]
     results = await asyncio.gather(*tasks)
@@ -983,16 +979,16 @@ async def verify_stats(interaction: discord.Interaction):
     verified_pct = round(verified_count / total_members * 100, 2) if total_members else 0
     not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0
 
-    # ----- 멘션 함수 -----
-    def mention(m):
-        return f"<@{m.id if isinstance(m, discord.Member) else m}>"
+    # ----- 멘션 함수 (항상 <@id> 형식) -----
+    def mention_member(m: discord.Member):
+        return f"<@{m.id}>"
 
     # ----- Embed chunking 함수 -----
     def chunk_lines(title: str, members_list: list[discord.Member], emoji: str):
         if not members_list:
             return []
 
-        lines = [f"- {mention(m)} (`{m.id if isinstance(m, discord.Member) else m}`)" for m in members_list]
+        lines = [f"- {mention_member(m)} (`{m.id}`)" for m in members_list]
         text = "\n".join(lines)
 
         MAX_LEN = 1900
@@ -1053,7 +1049,7 @@ async def verify_stats(interaction: discord.Interaction):
             await interaction.response.edit_message(embed=self.embeds[self.current], view=self)
 
     await interaction.followup.send(embed=embeds_to_send[0], view=Pages(embeds_to_send), ephemeral=True)
-    
+
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):

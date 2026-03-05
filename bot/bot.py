@@ -952,26 +952,23 @@ async def verify_stats(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    # ----- 봇이 아닌 모든 멤버 가져오기 -----
+    # ----- 봇 제외 모든 멤버 가져오기 -----
     members: list[discord.Member] = [m for m in guild.members if not m.bot]
 
-    verified_members: list[discord.Member] = []
-    not_verified_members: list[discord.Member] = []
+    # ----- API 체크: 인증된 멤버 ID만 set으로 저장 -----
+    verified_ids = set()
+    loop = asyncio.get_running_loop()
 
-    # ----- API 확인을 비동기 병렬로 실행 -----
-    async def check_member(m: discord.Member):
-        loop = asyncio.get_running_loop()
-        verified = await loop.run_in_executor(None, is_already_verified, guild.id, m.id)
-        return m, verified  # ✅ 항상 Member 객체 반환
+    async def check_verified(m: discord.Member):
+        is_verified = await loop.run_in_executor(None, is_already_verified, guild.id, m.id)
+        if is_verified:
+            verified_ids.add(m.id)
 
-    tasks = [check_member(m) for m in members]
-    results = await asyncio.gather(*tasks)
+    await asyncio.gather(*(check_verified(m) for m in members))
 
-    for m, verified in results:
-        if verified:
-            verified_members.append(m)
-        else:
-            not_verified_members.append(m)
+    # ----- 멤버 객체 기준으로 분류 -----
+    verified_members = [m for m in members if m.id in verified_ids]
+    not_verified_members = [m for m in members if m.id not in verified_ids]
 
     total_members = len(members)
     verified_count = len(verified_members)
@@ -979,16 +976,16 @@ async def verify_stats(interaction: discord.Interaction):
     verified_pct = round(verified_count / total_members * 100, 2) if total_members else 0
     not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0
 
-    # ----- 멘션 함수 (항상 <@id> 형식) -----
+    # ----- 멘션 함수 -----
     def mention_member(m: discord.Member):
-        return f"<@{m.id}>"
+        return m.mention  # Member 객체 그대로 쓰기 때문에 멘션 완전히 정상
 
-    # ----- Embed chunking 함수 -----
+    # ----- Embed chunking -----
     def chunk_lines(title: str, members_list: list[discord.Member], emoji: str):
         if not members_list:
             return []
 
-        lines = [f"- {mention_member(m)} (`{m.id}`)" for m in members_list]
+        lines = [f"- {mention_member(m)}" for m in members_list]
         text = "\n".join(lines)
 
         MAX_LEN = 1900
@@ -1009,7 +1006,7 @@ async def verify_stats(interaction: discord.Interaction):
             e = discord.Embed(
                 title=f"{emoji} {title} ({idx}/{len(chunks)})",
                 description=f"**{'✅ 인증자' if emoji=='🟢' else '❌ 미인증자'} ({total}명)**\n{chunk_text}",
-                color=discord.Color.green() if emoji=='🟢' else discord.Color.red(),
+                color=discord.Color.green() if emoji == "🟢" else discord.Color.red(),
                 timestamp=datetime.now(timezone.utc)
             )
             e.set_footer(text=f"Made By Lunar | 총 {total}명")

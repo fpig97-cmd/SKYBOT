@@ -931,7 +931,22 @@ def make_bulk_rank_summary_embed(
 
     embed.set_footer(text="Made By Lunar")
     return embed
+# ---------- 사용안하는 명령어 ----------
 
+DISABLED_COMMANDS = ["역할목록", "역할전체변경",
+ "일괄닉네임변경", "장교역할"]
+
+@bot.tree.interaction_check
+async def check(interaction: discord.Interaction):
+
+    if interaction.command.name in DISABLED_COMMANDS:
+        await interaction.response.send_message(
+            "현재는 이용할 수 없습니다.",
+            ephemeral=True
+        )
+        return False
+
+    return True
 # ---------- 슬래시 명령어 ----------
 
 @bot.tree.command(name="인증통계", description="서버 인증 통계를 보여줍니다.")

@@ -979,11 +979,11 @@ async def verify_stats(interaction: discord.Interaction):
     verified_pct = pct(verified_count, total_members)
     not_verified_pct = pct(not_verified_count, total_members)
 
-     ----- 메인 통계 Embed -----
+    # ----- 메인 통계 Embed -----
     main_embed = discord.Embed(
-        #title="📊 인증 통계",
-        #color=discord.Color.blurple(),
-        #timestamp=datetime.now(timezone.utc),
+        title="📊 인증 통계",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc),
     )
     main_embed.add_field(
         name="서버 인원수",

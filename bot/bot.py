@@ -2933,4 +2933,3 @@ async def disabled_commands_check(interaction: discord.Interaction):
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-

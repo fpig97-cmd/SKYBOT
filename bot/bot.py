@@ -53,6 +53,7 @@ LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Rail
 intents = discord.Intents.default()
 intents.members = True 
 
+
 COMMANDS_DISABLED = False
 DISABLED_COMMANDS = ["일괄닉네임변경", "장교역할"] 
 

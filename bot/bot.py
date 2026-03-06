@@ -1167,7 +1167,15 @@ async def verify_stats(interaction: discord.Interaction):
     not_verified_pct = round(not_verified_count / total_members * 100, 2) if total_members else 0 
 
     # ----------------- Embed Chunking -----------------
-    def chunk_lines(title: str, members_list: list[discord.members])
+    def chunk_lines(title: str, members_list: list[discord.Member]):
+    chunks = []
+    chunk_size = 20  # 한 Embed에 최대 20명씩
+    for i in range(0, len(members_list), chunk_size):
+        chunk = members_list[i:i+chunk_size]
+        lines = [f"{m.display_name} ({m.id})" for m in chunk]
+        chunks.append(f"**{title}**\n" + "\n".join(lines))
+    return chunks
+        
 @bot.tree.command(name="역할목록", description="서버 역할과 봇 역할을 10개씩 출력합니다.(관리자)")
 async def role_all(interaction: discord.Interaction): 
 

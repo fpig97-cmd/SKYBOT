@@ -53,6 +53,16 @@ LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Rail
 intents = discord.Intents.default()
 intents.members = True
 
+COMMANDS_DISABLED = False
+DISABLED_COMMANDS = [
+    "역할목록",
+    "역할전체변경",
+    "일괄닉네임변경",
+    "장교역할"
+]
+
+DEVELOPER_ID = 1276176866440642561
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # ← 이 줄은 그대로 두고,
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 
@@ -947,6 +957,37 @@ async def check(interaction: discord.Interaction):
 
     return True
 # ---------- 슬래시 명령어 ----------
+
+@bot.tree.command(name="명령어차단")
+@app_commands.describe(state="all / true / false")
+async def toggle_commands(interaction: discord.Interaction, state: str):
+
+    global COMMANDS_DISABLED
+
+    if interaction.user.id != DEVELOPER_ID:
+        await interaction.response.send_message("개발자 전용입니다.", ephemeral=True)
+        return
+
+    if state.lower() == "true":
+        COMMANDS_DISABLED = True
+        msg = "명령어 차단이 **ON** 되었습니다."
+
+    elif state.lower() == "false":
+        COMMANDS_DISABLED = False
+        msg = "명령어 차단이 **OFF** 되었습니다."
+
+    elif state.lower() == "all":
+        COMMANDS_DISABLED = True
+        msg = "모든 대상 명령어가 **차단되었습니다.**"
+
+    else:
+        await interaction.response.send_message(
+            "옵션: all / true / false",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.send_message(msg, ephemeral=True)
 
 @bot.tree.command(name="인증통계", description="서버 인증 통계를 보여줍니다.")
 async def verify_stats(interaction: discord.Interaction):
@@ -1974,6 +2015,14 @@ async def view_verification_log(interaction: discord.Interaction, 최근: int = 
     description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)"
 )
 @app_commands.guilds(discord.Object(id=GUILD_ID))
+
+if COMMANDS_DISABLED:
+    await interaction.response.send_message(
+        "현재는 이용할 수 없습니다.",
+        ephemeral=True
+    )
+    return
+
 async def bulk_nickname_change(interaction: discord.Interaction):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
@@ -2226,6 +2275,14 @@ async def set_all_role(interaction: discord.Interaction):
 @bot.tree.command(name="장교역할", description="장교 (영관급 ~ 장성급) 에게 부여할 역할을 설정합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(role="영관급 장교 역할")
+
+if COMMANDS_DISABLED:
+    await interaction.response.send_message(
+        "현재는 이용할 수 없습니다.",
+        ephemeral=True
+    )
+    return
+
 async def set_senior_officer_role(interaction: discord.Interaction, role: discord.Role):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
@@ -2861,12 +2918,6 @@ async def on_ready():
     if not officer_role_sync_task.is_running():
         officer_role_sync_task.start()
 # 명령어 막기
-DISABLED_COMMANDS = [
-    "역할목록",
-    "역할전체변경",
-    "일괄닉네임변경",
-    "장교역할"
-]
 
 @bot.tree.interaction_check
 async def disabled_commands_check(interaction: discord.Interaction):

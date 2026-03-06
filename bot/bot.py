@@ -85,6 +85,7 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN이 .env에 설정되어 있지 않습니다.")
 
 intents = discord.Intents.all()
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 error_logs: list[dict] = []

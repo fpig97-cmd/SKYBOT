@@ -54,23 +54,9 @@ intents = discord.Intents.default()
 intents.members = True
 
 COMMANDS_DISABLED = False
-
 DISABLED_COMMANDS = ["일괄닉네임변경", "장교역할"]
 
-@bot.event
-async def on_interaction(interaction: discord.Interaction):
-
-    if interaction.type == discord.InteractionType.application_command:
-
-        for cmd in DISABLED_COMMANDS:
-            if interaction.data["name"] == cmd:
-                await interaction.response.send_message(
-                    "현재는 이용할 수 없습니다.",
-                    ephemeral=True
-                )
-                return
-
-    await bot.process_application_commands(interaction)
+DISABLED_COMMANDS = ["일괄닉네임변경", "장교역할"]
 
 DEVELOPER_ID = 1276176866440642561
 
@@ -105,7 +91,7 @@ error_logs: list[dict] = []
 MAX_LOGS = 50
 
 DB_PATH = os.path.join(BASE_DIR, "bot.db")
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+conn = sqlite3.connect(DB_PATH, check_ame_thread=False)
 cursor = conn.cursor()
 
 # ---------- DB 스키마 ----------
@@ -2915,18 +2901,18 @@ async def on_ready():
     if not officer_role_sync_task.is_running():
         officer_role_sync_task.start()
 # 명령어 막기
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
 
-@bot.tree.interaction_check
-async def disabled_commands_check(interaction: discord.Interaction):
+    if interaction.type == discord.InteractionType.application_command:
 
-    if interaction.command and interaction.command.name in DISABLED_COMMANDS:
-        await interaction.response.send_message(
-            "⚠️ 현재는 이용할 수 없습니다.",
-            ephemeral=True
-        )
-        return False  # 실행 자체 차단
-
-    return True
+        for cmd in DISABLED_COMMANDS:
+            if interaction.data["name"] == cmd:
+                await interaction.response.send_message(
+                    "현재는 이용할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
 
 if __name__ == "__main__":
     bot.run(TOKEN)

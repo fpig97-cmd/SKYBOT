@@ -19,6 +19,7 @@ import requests
 from datetime import datetime
 from enum import Enum
 
+DISABLED_COMMANDS = {"역할목록", "역할전체변경", "일괄닉네임변경", "장교역할"}
 
 VERIFY_ROLE_ID = 1461636782176075831      # 🟢 인증자 역할 ID
 UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
@@ -2861,6 +2862,15 @@ async def on_ready():
         sync_all_nicknames_task.start()
     if not officer_role_sync_task.is_running():
         officer_role_sync_task.start()
+# 명령어 막기
+@bot.tree.interaction_check
+async def disabled_command_check(interaction: discord.Interaction):
+    cmd = interaction.command
+    if cmd and cmd.name in DISABLED_COMMANDS:
+        if not interaction.response.is_done():
+            await interaction.response.send_message("현재는 이용할 수 없습니다.", ephemeral=True)
+        return False
+    return True
 
 if __name__ == "__main__":
     bot.run(TOKEN)

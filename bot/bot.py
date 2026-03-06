@@ -54,17 +54,23 @@ intents = discord.Intents.default()
 intents.members = True
 
 COMMANDS_DISABLED = False
-DISABLED_COMMANDS = [
-    "역할목록",
-    "역할전체변경",
-    "일괄닉네임변경",
-    "장교역할"
-]
 
-for cmd in DISABLED_COMMANDS:
-    if interaction.command.name == cmd:
-        await interaction.response.send_message("⚠️ 현재는 이용할 수 없습니다.", ephemeral=True)
-        return
+DISABLED_COMMANDS = ["일괄닉네임변경", "장교역할"]
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+
+    if interaction.type == discord.InteractionType.application_command:
+
+        for cmd in DISABLED_COMMANDS:
+            if interaction.data["name"] == cmd:
+                await interaction.response.send_message(
+                    "현재는 이용할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+
+    await bot.process_application_commands(interaction)
 
 DEVELOPER_ID = 1276176866440642561
 

@@ -92,8 +92,8 @@ error_logs: list[dict] = []
 MAX_LOGS = 50
 
 DB_PATH = os.path.join(BASE_DIR, "bot.db")
-connd = sqlite3.connect(DB_PATH, check_same_thread=False)
-cursor = connd.cursor()
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+cursor = conn.cursor()
 
 # ---------- DB 스키마 ----------
 cursor.execute(

@@ -20,7 +20,7 @@ from datetime import datetime
 from enum import Enum 
 
 
-VERIFY_ROLE_ID = 1461636782176075831      # 🟢 인증자 역할 ID
+VERIFY_ROLE_ID = 1461636782176075831      # 🟢 인증자 역할 ID
 UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
 ADMIN_LOG_CHANNEL_ID = 1468191799855026208 # 📋 관리자 로그 채널 ID 
 

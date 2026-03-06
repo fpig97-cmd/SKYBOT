@@ -2902,6 +2902,7 @@ async def on_ready():
     if not officer_role_sync_task.is_running():
         officer_role_sync_task.start()
 # 명령어 막기
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
 

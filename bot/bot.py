@@ -61,6 +61,11 @@ DISABLED_COMMANDS = [
     "장교역할"
 ]
 
+for cmd in DISABLED_COMMANDS:
+    if interaction.command.name == cmd:
+        await interaction.response.send_message("⚠️ 현재는 이용할 수 없습니다.", ephemeral=True)
+        return
+
 DEVELOPER_ID = 1276176866440642561
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # ← 이 줄은 그대로 두고,
@@ -2016,13 +2021,6 @@ async def view_verification_log(interaction: discord.Interaction, 최근: int = 
 )
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 
-if COMMANDS_DISABLED:
-    await interaction.response.send_message(
-        "현재는 이용할 수 없습니다.",
-        ephemeral=True
-    )
-    return
-
 async def bulk_nickname_change(interaction: discord.Interaction):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
@@ -2275,13 +2273,6 @@ async def set_all_role(interaction: discord.Interaction):
 @bot.tree.command(name="장교역할", description="장교 (영관급 ~ 장성급) 에게 부여할 역할을 설정합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(role="영관급 장교 역할")
-
-if COMMANDS_DISABLED:
-    await interaction.response.send_message(
-        "현재는 이용할 수 없습니다.",
-        ephemeral=True
-    )
-    return
 
 async def set_senior_officer_role(interaction: discord.Interaction, role: discord.Role):
     if not is_admin(interaction.user):

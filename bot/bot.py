@@ -955,9 +955,104 @@ async def check(interaction: discord.Interaction):
 
     return True
 # ---------- 슬래시 명령어 ---------- 
-
 # 인증
+@bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
+@app_commands.describe(로블닉="로블록스 닉네임")
+async def verify(interaction: discord.Interaction, 로블닉: str):
+    await interaction.response.defer(ephemeral=True)
 
+
+    print(
+        f"/인증 로블닉:{로블닉} "
+        f"(user={interaction.user} id={interaction.user.id})"
+    )
+
+    if is_already_verified(interaction.guild.id, interaction.user.id):
+        await interaction.followup.send(
+            "이미 인증된 사용자입니다. (웹 로그 기준)",
+            ephemeral=True,
+        )
+        return
+
+    user_id = await roblox_get_user_id_by_username(로블닉)
+    if not user_id:
+        await interaction.followup.send(
+            "해당 닉네임의 로블록스 계정을 찾을 수 없습니다.",
+            ephemeral=True,
+        )
+        return
+    
+
+    cursor.execute(
+        "SELECT group_id FROM blacklist WHERE guild_id=?",
+        (interaction.guild.id,),
+    )
+    blacklist_groups = {row[0] for row in cursor.fetchall()}
+    if blacklist_groups:
+        
+
+        user_groups = await roblox_get_user_groups(user_id)
+        blocked_groups = [g for g in user_groups if g in blacklist_groups]
+        if blocked_groups:
+            await interaction.followup.send(
+                "❌ 블랙리스트된 그룹에 속해 있어서 인증할 수 없습니다.\n"
+                f"차단된 그룹: {', '.join(map(str, blocked_groups))}",
+                ephemeral=True,
+            )
+            return
+
+    code = generate_code()
+    expire_time = datetime.now() + timedelta(minutes=5)
+
+    # DM용 안내 embed
+    dm_embed = discord.Embed(
+        title="로블록스 인증",
+        color=discord.Color.blue(),
+    )
+    dm_embed.description = (
+        f"> Roblox: `{로블닉}` (ID: `{user_id}`)\n"
+        f"> 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        "1️⃣ Roblox 프로필로 이동\n"
+        "2️⃣ 설명란에 코드 입력\n"
+        "3️⃣ '인증하기' 버튼 클릭\n\n"
+        f"🔐 코드: `{code}`\n"
+        "⏱ 남은 시간: 5분\n\n"
+        "Made by Lunar"
+    )
+
+    view = VerifyView(
+        code=code,
+        expiretime=expire_time,
+        guildid=interaction.guild.id,
+        roblox_nick=로블닉,
+        roblox_user_id=user_id,
+    )
+
+    # ✅ 인증 요청 로그 채널로 전송
+    try:
+        log_ch_id = get_log_channel(interaction.guild.id, "verify")
+        if log_ch_id:
+            log_ch = interaction.guild.get_channel(log_ch_id) or await interaction.guild.fetch_channel(log_ch_id)
+            if log_ch:
+                req_embed = make_verify_embed(
+                    VerifyLogType.REQUEST,
+                    user=interaction.user,
+                    roblox_nick=로블닉,
+                    code=code,
+                )
+                await log_ch.send(embed=req_embed)
+    except Exception as e:
+        print("[VERIFY_REQUEST_LOG_ERROR]", repr(e))
+
+    # DM 전송
+    try:
+        await interaction.user.send(embed=dm_embed, view=view)
+        await interaction.followup.send("📩 DM을 확인해주세요.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send(
+            "DM 전송에 실패했습니다. DM 수신을 허용하고 다시 시도해주세요.",
+            ephemeral=True,
+        )
 
 @bot.tree.command(name="강제인증", description="유저를 강제로 인증 처리합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -1726,7 +1821,7 @@ async def sync_commands(interaction: discord.Interaction):
         await interaction.followup.send(msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"동기화 중 오류: {e}", ephemeral=True) 
-
+    
 @bot.tree.command(
     name="일괄닉네임변경",
     description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)"

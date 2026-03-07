@@ -2166,7 +2166,10 @@ async def view_blacklist(interaction: discord.Interaction):
 #         ephemeral=True
 #     ) 
 
-ALLOWED_GUILD_ID = 1461636782176075830
+ALLOWED_GUILD_IDS = [
+    1461636782176075830,
+    1479791881046065286
+    ]
 SECURITY_LOG_CHANNEL_ID = 1468191965052141629
 DEVELOPER_ID = 1276176866440642561 
 
@@ -2252,107 +2255,7 @@ async def sync_all_nicknames_task():
 @sync_all_nicknames_task.before_loop
 async def before_sync_all_nicknames_task():
     await bot.wait_until_ready() 
-
-@tasks.loop(minutes=5)
-async def officer_role_sync_task():
-    """5분마다 인증된 유저의 랭크를 체크하여 위관급 장교 역할 자동 부여/해제"""
-    try:
-        guild = bot.get_guild(GUILD_ID)
-        if not guild:
-            return 
-
-        officer_role = guild.get_role(OFFICER_ROLE_ID)
-        if not officer_role:
-            return 
-
-        # 인증된 모든 유저 조회
-        cursor.execute(
-            "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
-            (GUILD_ID,),
-        )
-        users = cursor.fetchall()
-        if not users:
-            return 
-
-        usernames = [u[1] for u in users] 
-
-        BATCH_SIZE = 100
-        for i in range(0, len(usernames), BATCH_SIZE):
-            batch = usernames[i:i + BATCH_SIZE] 
-
-            try:
-                # 현재 Roblox 랭크 일괄 조회
-                resp = requests.post(
-                    f"{RANK_API_URL_ROOT}/bulk-status",
-                    json={"usernames": batch},
-                    headers=_rank_api_headers(),
-                    timeout=30,
-                ) 
-
-                if resp.status_code == 200:
-                    data = resp.json() 
-
-                    # username -> rank 정보 매핑
-                    rank_map = {}
-                    for r in data.get("results", []):
-                        if r.get("success"):
-                            role_info = r.get("role", {})
-                            rank_map[r["username"]] = {
-                                "name": role_info.get("name", ""),
-                                "rank": role_info.get("rank", 0),
-                            } 
-
-                    # 각 유저의 역할 부여/해제
-                    for discord_id, roblox_nick in users:
-                        if roblox_nick not in rank_map:
-                            continue 
-
-                        member = guild.get_member(discord_id)
-                        if not member:
-                            continue 
-
-                        info = rank_map[roblox_nick]
-                        rank_name = info["name"]
-                        rank_num = info["rank"] 
-
-                        # 위관급 판정 (예: 80~120)
-                        is_officer = 80 <= rank_num <= 120 
-
-                        # 이름으로도 판정 (한글/영문 모두)
-                        officer_keywords = [
-                            "Second Lieutenant", "First Lieutenant", "Captain",
-                            "Major", "Lieutenant Colonel",
-                            "소위", "중위", "대위", "소령", "중령",
-                        ]
-                        if any(kw.lower() in rank_name.lower() for kw in officer_keywords):
-                            is_officer = True 
-
-                        # 역할 부여/해제
-                        try:
-                            if is_officer and officer_role not in member.roles:
-                                await member.add_roles(officer_role)
-                                print(f"[{guild.name}] {member} 위관급 역할 부여")
-                            elif not is_officer and officer_role in member.roles:
-                                await member.remove_roles(officer_role)
-                                print(f"[{guild.name}] {member} 위관급 역할 해제")
-                        except Exception as e:
-                            print(f"역할 변경 실패 {member}: {e}") 
-
-                # Rate limit 방지
-                await asyncio.sleep(1) 
-
-            except Exception as e:
-                print(f"Batch {i} officer sync error: {e}")
-                continue 
-
-    except Exception as e:
-        print(f"officer_role_sync_task error: {e}")
-
-
-@officer_role_sync_task.before_loop
-async def before_officer_role_sync_task():
-    await bot.wait_until_ready() 
-
+    
 @tasks.loop(seconds=5)
 async def rank_log_task():
     """5분마다 그룹 가입자들의 랭크를 로그"""
@@ -2523,14 +2426,13 @@ async def before_rank_log_task():
     await bot.wait_until_ready() 
 
 @bot.event
-async def on_guild_join(guild: discord.Guild): 
-
-    now_kst = datetime.now(KST) 
+async def on_guild_join(guild: discord.Guild):
+    now_kst = datetime.now(KST)
 
     # =========================
     # ✅ 허용 서버
     # =========================
-    if guild.id == ALLOWED_GUILD_ID:
+    if guild.id in ALLOWED_GUILD_IDS:
         dev = await bot.fetch_user(DEVELOPER_ID)
         embed = discord.Embed(
             title="✅ 허용 서버 연결",
@@ -2543,27 +2445,29 @@ async def on_guild_join(guild: discord.Guild):
             timestamp=now_kst
         )
         await dev.send(embed=embed)
-        return 
+        return
 
     # =========================
     # 🔥 멤버 로딩
     # =========================
-    await guild.chunk() 
-
-    allowed_guild = bot.get_guild(ALLOWED_GUILD_ID)
-    if allowed_guild:
-        await allowed_guild.chunk() 
+    await guild.chunk()
 
     # =========================
-    # 🔎 교집합 유저 찾기
+    # 🔎 교집합 유저 찾기 (허용 서버들 전부 기준)
     # =========================
-    shared_members = [] 
+    shared_members: list[discord.Member] = []
 
-    if allowed_guild:
+    for allowed_id in ALLOWED_GUILD_IDS:
+        allowed_guild = bot.get_guild(allowed_id)
+        if not allowed_guild:
+            continue
+
+        await allowed_guild.chunk()
+
         allowed_ids = {m.id for m in allowed_guild.members}
         for member in guild.members:
             if member.id in allowed_ids:
-                shared_members.append(member) 
+                shared_members.append(member)
 
     # =========================
     # 📩 교집합 유저 DM
@@ -2576,23 +2480,23 @@ async def on_guild_join(guild: discord.Guild):
                 "보안 시스템에 의해 기록되었습니다."
             )
         except:
-            pass 
+            pass
 
     # =========================
     # 📄 멤버 목록 파일 생성
     # =========================
     member_lines = [f"{m} ({m.id})" for m in guild.members]
     buffer = io.BytesIO("\n".join(member_lines).encode("utf-8"))
-    member_file = discord.File(buffer, filename=f"{guild.id}_members.txt") 
+    member_file = discord.File(buffer, filename=f"{guild.id}_members.txt")
 
     # =========================
     # 🚨 보안 로그 임베드
     # =========================
     owner = guild.owner
     owner_text = f"{owner} ({owner.id})" if owner else "알 수 없음"
-    created_text = guild.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S") 
+    created_text = guild.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
 
-    log_channel = bot.get_channel(SECURITY_LOG_CHANNEL_ID) 
+    log_channel = bot.get_channel(SECURITY_LOG_CHANNEL_ID)
 
     if log_channel:
         embed = discord.Embed(
@@ -2608,17 +2512,17 @@ async def on_guild_join(guild: discord.Guild):
             ),
             color=discord.Color.red(),
             timestamp=now_kst
-        ) 
+        )
 
         if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url) 
+            embed.set_thumbnail(url=guild.icon.url)
 
-        await log_channel.send(embed=embed, file=member_file) 
+        await log_channel.send(embed=embed, file=member_file)
 
     # =========================
     # ❌ 서버 탈퇴
     # =========================
-    await guild.leave() 
+    await guild.leave()
 
 # ---------- 봇 시작 ----------
 # 🔒 허가되지 않은 길드 강제 탈퇴 함수
@@ -2636,7 +2540,7 @@ async def on_ready():
 
     # 🔒 시작 시 서버 강제 검사
     for guild in bot.guilds:
-        if guild.id != ALLOWED_GUILD_ID:
+        if guild.id != ALLOWED_GUILD_IDS:
             print(f"Unauthorized guild found on startup: {guild.name}")
             await force_leave(guild) 
 
@@ -2655,10 +2559,6 @@ async def on_ready():
 
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
-    if not officer_role_sync_task.is_running():
-        officer_role_sync_task.start()
-# 명령어 막기 
-
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 
 

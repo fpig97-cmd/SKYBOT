@@ -1018,6 +1018,223 @@ async def verify(interaction: discord.Interaction, 로블닉: str):
             ephemeral=True,
         )
 
+@bot.tree.command(name="일괄강제인증", description="현재 서버의 모든 미인증자를 강제인증 처리합니다. (제작자 전용)")
+async def bulk_force_verify(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    # 🔐 제작자(OWNER_ID)만 허용
+    if not is_owner(interaction.user):
+        await interaction.response.send_message("제작자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=False)
+
+    # 로그 채널
+    log_channel_id = get_log_channel(guild.id, "verify")
+    log_channel: discord.TextChannel | None = guild.get_channel(log_channel_id) if log_channel_id else None
+
+    # 대상 멤버 (봇 제외)
+    members: list[discord.Member] = [m for m in guild.members if not m.bot]
+
+    # 미인증자 필터 (웹 API 사용 안 함)
+    verified_ids: set[int] = set()
+    loop = asyncio.get_running_loop()
+
+    def _check_one(user_id: int) -> bool:
+        # is_already_verified가 웹 안 쓰도록 바꿨다면 그대로, 아니면 여기서 DB-only 버전 사용
+        return is_already_verified(guild.id, user_id)
+
+    async def check_verified(m: discord.Member):
+        is_verified = await loop.run_in_executor(None, _check_one, m.id)
+        if is_verified:
+            verified_ids.add(m.id)
+
+    await asyncio.gather(*(check_verified(m) for m in members))
+
+    targets = [m for m in members if m.id not in verified_ids]
+
+    total = len(targets)
+    success = 0
+    fail = 0
+
+    # 진행 상황 엠베드
+    if log_channel:
+        embed = discord.Embed(
+            title="<:Chack_blue:1479810189434683402> 일괄 강제인증 시작",
+            description=f"대상 인원: {total}명",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="<:Chack_blue:1479810189434683402> 성공", value=str(success))
+        embed.add_field(name="<:X_red:1479810084900044851> 실패", value=str(fail))
+        embed.set_footer(text=f"요청자: {interaction.user} ({interaction.user.id})")
+        progress_msg = await log_channel.send(embed=embed)
+    else:
+        progress_msg = None
+
+    for idx, member in enumerate(targets, start=1):
+        try:
+            verify_role = guild.get_role(VERIFY_ROLE_ID)
+            unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
+
+            if verify_role and verify_role in member.roles:
+                continue
+
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO forced_verified(discord_id, guild_id, roblox_nick, roblox_user_id, rank_role)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (member.id, guild.id, None, None, "forced")
+            )
+            conn.commit()
+
+            if verify_role:
+                await member.add_roles(verify_role, reason="일괄 강제인증")
+            if unverify_role and unverify_role in member.roles:
+                await member.remove_roles(unverify_role, reason="일괄 강제인증")
+
+            send_log_to_web(
+                guild_id=guild.id,
+                user_id=member.id,
+                action="force_verify_bulk",
+                detail=f"일괄 강제인증 처리 (요청자: {interaction.user.id})"
+            )
+
+            success += 1
+
+        except Exception as e:
+            fail += 1
+            add_error_log(f"bulk_force_verify: {repr(e)}")
+
+        # 게이트웨이 지연 방지용 약간의 양보
+        if idx % 20 == 0:
+            await asyncio.sleep(0)
+
+        if progress_msg and (idx % 10 == 0 or idx == total):
+            progress_embed = discord.Embed(
+                title="일괄 강제인증 진행 중",
+                description=f"{idx}/{total}명 처리 완료",
+                color=discord.Color.blurple()
+            )
+            progress_embed.add_field(name="성공", value=str(success))
+            progress_embed.add_field(name="실패", value=str(fail))
+            progress_embed.set_footer(text=f"요청자: {interaction.user} ({interaction.user.id})")
+            try:
+                await progress_msg.edit(embed=progress_embed)
+            except discord.NotFound:
+                progress_msg = None
+
+    # stats 업데이트
+    cursor.execute(
+        """
+        INSERT INTO stats(guild_id, verify_count, force_count, cancel_count)
+        VALUES(?, 0, ?, 0)
+        ON CONFLICT(guild_id) DO UPDATE SET force_count = stats.force_count + ?
+        """,
+        (guild.id, success, success)
+    )
+    conn.commit()
+
+    result_text = (
+        f"대상: {total}명\n"
+        f"<:Chack_blue:1479810189434683402> 성공: {success}명\n"
+        f"<:X_red:1479810084900044851>  실패: {fail}명"
+    )
+
+    # 최종 응답 (Unknown Message 방지)
+    try:
+        if interaction.response.is_done():
+            await interaction.edit_original_response(content=result_text)
+        else:
+            await interaction.response.send_message(result_text)
+    except discord.NotFound:
+        pass
+
+    if log_channel:
+        final_embed = discord.Embed(
+            title="<:Chack_blue:1479810189434683402> 일괄 강제인증 완료",
+            description=result_text,
+            color=discord.Color.green()
+        )
+        final_embed.set_footer(text=f"요청자: {interaction.user} ({interaction.user.id})")
+        await log_channel.send(embed=final_embed)
+
+@bot.tree.command(name="강제인증해제", description="특정 유저의 강제인증을 해제합니다. (관리자)")
+@app_commands.describe(
+    user="강제인증을 해제할 디스코드 유저"
+)
+async def force_unverify(
+    interaction: discord.Interaction,
+    user: discord.User,
+):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.followup.send("길드에서만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    member = guild.get_member(user.id)
+    if member is None:
+        await interaction.followup.send("해당 유저를 서버에서 찾을 수 없습니다.", ephemeral=True)
+        return
+
+    verify_role = guild.get_role(VERIFY_ROLE_ID)
+    unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
+
+    # DB에서 강제인증 기록 삭제
+    cursor.execute(
+        """
+        DELETE FROM forced_verified
+        WHERE discord_id = ? AND guild_id = ?
+        """,
+        (member.id, guild.id),
+    )
+    conn.commit()
+
+    # 역할 롤백
+    try:
+        if verify_role and verify_role in member.roles:
+            await member.remove_roles(verify_role, reason="강제인증 해제")
+
+        if unverify_role and unverify_role not in member.roles:
+            await member.add_roles(unverify_role, reason="강제인증 해제")
+    except Exception as e:
+        add_error_log(f"force_unverify_roles: {repr(e)}")
+        await interaction.followup.send(f"역할 변경 중 오류 발생: {e}", ephemeral=True)
+        return
+
+    # 웹 로그
+    send_log_to_web(
+        guild_id=guild.id,
+        user_id=member.id,
+        action="force_unverify",
+        detail=f"강제인증 해제 (요청자: {interaction.user.id})",
+    )
+
+    # stats.cancel_count 증가
+    cursor.execute(
+        """
+        INSERT INTO stats(guild_id, verify_count, force_count, cancel_count)
+        VALUES(?, 0, 0, 1)
+        ON CONFLICT(guild_id) DO UPDATE SET cancel_count = stats.cancel_count + 1
+        """,
+        (guild.id,),
+    )
+    conn.commit()
+
+    await interaction.followup.send(
+        f"{member.mention} 님의 강제인증을 해제했습니다.",
+        ephemeral=True,
+    )
+
 @bot.tree.command(name="강제인증", description="유저를 강제로 인증 처리합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 @app_commands.describe(

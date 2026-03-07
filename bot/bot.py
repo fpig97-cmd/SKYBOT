@@ -23,6 +23,13 @@ VERIFY_ROLE_ID = 1461636782176075831      # 🟢 인증자 역할 ID
 UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
 ADMIN_LOG_CHANNEL_ID = 1468191799855026208 # 📋 관리자 로그 채널 ID 
 
+# emoji = {"<:X_red:1479810084900044851>",
+#          "<:_red:1479810110632099972>",
+#          "<:Log_blue:1479810216597127224>",
+#          "<:Chack_blue:1479810189434683402>",
+#          "<:announce_blue:1479810147911205006>",
+#          "<:verfired_green:1479810239619530752>"}
+
 API_BASE = "https://web-api-production-69fc.up.railway.app" 
 
 def is_already_verified(guild_id: int, user_id: int) -> bool:
@@ -520,12 +527,12 @@ class VerifyView(discord.ui.View):
         self.expiretime = expiretime
         self.guildid = guildid
         self.roblox_nick = roblox_nick
-        self.roblox_user_id = roblox_user_id 
+        self.roblox_user_id = roblox_user_id
 
     @discord.ui.button(label="인증하기", style=discord.ButtonStyle.green)
     async def verifybutton(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction is None:
-            return 
+            return
 
         try:
             # 0) 길드 확보
@@ -540,7 +547,7 @@ class VerifyView(discord.ui.View):
                         "길드를 찾을 수 없습니다. 서버에서 다시 /인증 해 주세요.",
                         ephemeral=True,
                     )
-                return 
+                return
 
             # 1) 만료 체크
             if datetime.now() > self.expiretime:
@@ -549,7 +556,7 @@ class VerifyView(discord.ui.View):
                         "인증 코드가 만료되었습니다. 다시 /인증 명령을 사용해 주세요.",
                         ephemeral=True,
                     )
-                return 
+                return
 
             # 2) Roblox 프로필 설명에서 코드 확인
             description = await roblox_get_description_by_user_id(self.roblox_user_id)
@@ -559,7 +566,7 @@ class VerifyView(discord.ui.View):
                         "Roblox 프로필 설명을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.",
                         ephemeral=True,
                     )
-                return 
+                return
 
             if self.code not in description:
                 if not interaction.response.is_done():
@@ -567,15 +574,13 @@ class VerifyView(discord.ui.View):
                         "Roblox 프로필 설명에 인증 코드가 없습니다. 설명에 코드를 넣고 다시 시도해 주세요.",
                         ephemeral=True,
                     )
-                return 
+                return
 
             # 3) 역할 부여 + 관리자 로그
-            # 1️⃣ 설정에서 가져오는 역할 (필요하면 VERIFY_ROLE_ID 대신 쓸 수 있음)
             config_role_id = get_guild_role_id(guild.id)
 
-
             KST = timezone(timedelta(hours=9))
-            now_kst = datetime.now(KST) 
+            now_kst = datetime.now(KST)
 
             member = guild.get_member(interaction.user.id)
             if member is None:
@@ -584,11 +589,11 @@ class VerifyView(discord.ui.View):
                         "서버에서 회원 정보를 찾을 수 없습니다.",
                         ephemeral=True,
                     )
-                return 
+                return
 
             verify_role = guild.get_role(VERIFY_ROLE_ID)
             unverify_role = guild.get_role(UNVERIFY_ROLE_ID)
-            log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID) 
+            log_channel = guild.get_channel(ADMIN_LOG_CHANNEL_ID)
 
             if verify_role is None:
                 if not interaction.response.is_done():
@@ -596,7 +601,7 @@ class VerifyView(discord.ui.View):
                         "인증 역할을 찾을 수 없습니다. 관리자에게 문의해 주세요.",
                         ephemeral=True,
                     )
-                return 
+                return
 
             # 이미 인증된 경우 중복 방지
             if verify_role in member.roles:
@@ -605,23 +610,23 @@ class VerifyView(discord.ui.View):
                         "이미 인증된 상태입니다.",
                         ephemeral=True,
                     )
-                return 
+                return
 
-            account_created = member.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S") 
+            account_created = member.created_at.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
 
             # 🔴 기존 역할 제거
             if unverify_role and unverify_role in member.roles:
-                await member.remove_roles(unverify_role) 
+                await member.remove_roles(unverify_role)
 
                 if log_channel:
                     embed_remove = discord.Embed(
                         title="🔴 역할 제거",
                         color=discord.Color.red(),
                         timestamp=now_kst
-                    ) 
+                    )
 
                     if guild.icon:
-                        embed_remove.set_thumbnail(url=guild.icon.url) 
+                        embed_remove.set_thumbnail(url=guild.icon.url)
 
                     embed_remove.add_field(
                         name="디스코드",
@@ -632,42 +637,42 @@ class VerifyView(discord.ui.View):
                             f"계정 생성일: {account_created}"
                         ),
                         inline=False
-                    ) 
+                    )
 
                     embed_remove.add_field(
                         name="로블록스",
                         value=f"{self.roblox_nick}",
                         inline=False
-                    ) 
+                    )
 
                     embed_remove.add_field(
                         name="역할",
                         value=f"{unverify_role.mention}",
                         inline=False
-                    ) 
+                    )
 
                     embed_remove.add_field(
                         name="실행자",
                         value=f"{interaction.user.mention}",
                         inline=False
-                    ) 
+                    )
 
-                    embed_remove.set_footer(text="Made by Lunar | KST(UTC+9)") 
+                    embed_remove.set_footer(text="Made by Lunar | KST(UTC+9)")
 
-                    await log_channel.send(embed=embed_remove) 
+                    await log_channel.send(embed=embed_remove)
 
             # 🟢 인증 역할 추가
-            await member.add_roles(verify_role) 
+            await member.add_roles(verify_role)
 
             if log_channel:
                 embed_add = discord.Embed(
                     title="🟢 역할 추가",
                     color=discord.Color.green(),
                     timestamp=now_kst
-                ) 
+                )
 
                 if guild.icon:
-                    embed_add.set_thumbnail(url=guild.icon.url) 
+                    embed_add.set_thumbnail(url=guild.icon.url)
 
                 embed_add.add_field(
                     name="디스코드",
@@ -678,63 +683,37 @@ class VerifyView(discord.ui.View):
                         f"계정 생성일: {account_created}"
                     ),
                     inline=False
-                ) 
+                )
 
                 embed_add.add_field(
                     name="로블록스",
                     value=f"{self.roblox_nick}",
                     inline=False
-                ) 
+                )
 
                 embed_add.add_field(
                     name="역할",
                     value=f"{verify_role.mention}",
                     inline=False
-                ) 
+                )
 
                 embed_add.add_field(
                     name="실행자",
                     value=f"{interaction.user.mention}",
                     inline=False
-                ) 
+                )
 
-                embed_add.set_footer(text="Made by Lunar | KST(UTC+9)") 
+                embed_add.set_footer(text="Made by Lunar | KST(UTC+9)")
 
-                await log_channel.send(embed=embed_add) 
+                await log_channel.send(embed=embed_add)
 
-            # 4) (선택) 랭크 API로 닉네임 변경
-            rankname = "?"
-            try:
-                if RANK_API_URL_ROOT:
-                    resp = requests.post(
-                        f"{RANK_API_URL_ROOT}/bulk-status",
-                        json={"usernames": [self.roblox_nick]},
-                        headers=_rank_api_headers(),
-                        timeout=15,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        results = data.get("results", [])
-                        if results and results[0].get("success"):
-                            roleinfo = results[0].get("role") or {}
-                            rankname = roleinfo.get("name", "?")
-                if " | " in rankname:
-                    rankname = rankname.split(" | ")[-1]
-                newnick = f"[{rankname}] {self.roblox_nick}"
-                if len(newnick) > 32:
-                    newnick = newnick[:32]
-                try:
-                    await member.edit(nick=newnick)
-                except Exception as e:
-                    print("[NICK_EDIT_ERROR]", e)
-            except Exception as e:
-                print("[RANK_API_ERROR]", e) 
+            # 4) (선택) 랭크 API / 닉네임 변경 블럭 완전히 제거됨
 
             # 5) 파일/콘솔 로그
             try:
                 save_verification_log(member.name, self.roblox_nick)
             except Exception as e:
-                print("[VERIFY_LOG_ERROR]", e) 
+                print("[VERIFY_LOG_ERROR]", e)
 
             # 6) 웹 로그
             send_log_to_web(
@@ -742,7 +721,7 @@ class VerifyView(discord.ui.View):
                 user_id=interaction.user.id,
                 action="verify_success",
                 detail=f"{self.roblox_nick} ({self.roblox_user_id})",
-            ) 
+            )
 
             # 7) 인증 성공 로그 embed
             try:
@@ -754,18 +733,18 @@ class VerifyView(discord.ui.View):
                             VerifyLogType.SUCCESS,
                             user=member,
                             roblox_nick=self.roblox_nick,
-                            group_rank=rankname,
+                            group_rank=None,          # ← rankname 대신 None
                             account_age_days=None,
-                            new_nick=member.nick,
+                            new_nick=member.nick,     # 실제 현재 닉 그대로
                             at_time=datetime.now(),
                         )
                         await log_ch.send(embed=success_embed)
             except Exception as e:
-                print("[VERIFY_SUCCESS_LOG_ERROR]", repr(e)) 
+                print("[VERIFY_SUCCESS_LOG_ERROR]", repr(e))
 
             # 8) 유저 응답
             if not interaction.response.is_done():
-                await interaction.response.send_message("인증이 완료되었습니다!", ephemeral=True) 
+                await interaction.response.send_message("인증이 완료되었습니다!", ephemeral=True)
 
         except Exception as e:
             add_error_log(f"verifybutton: {repr(e)}")
@@ -774,7 +753,8 @@ class VerifyView(discord.ui.View):
                 await interaction.response.send_message(
                     "인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
                     ephemeral=True,
-                ) 
+                )
+
 
 # ---------- 클래스 ----------
 class VerifyLogType(str, Enum):
@@ -809,7 +789,7 @@ def make_verify_embed(
 
     if log_type is VerifyLogType.REQUEST:
         embed = discord.Embed(
-            title="📩 인증 요청",
+            title="✅ 인증 요청",
             color=discord.Color.blurple(),
             description="새로운 인증 코드 발급",
         )
@@ -826,7 +806,7 @@ def make_verify_embed(
 
     elif log_type is VerifyLogType.SUCCESS:
         embed = discord.Embed(
-            title="✅ 인증 성공",
+            title="<:verfired_green:1479810239619530752> 인증 성공",
             color=discord.Color.green(),
             description="새로운 유저가 인증을 완료했습니다.",
         )
@@ -848,7 +828,7 @@ def make_verify_embed(
 
     elif log_type is VerifyLogType.NO_GROUP:
         embed = discord.Embed(
-            title="⚠️ 그룹 미가입",
+            title="<:_red:1479810110632099972> 그룹 미가입",
             color=discord.Color.orange(),
             description="그룹 미가입 상태로 인증 실패",
         )
@@ -861,7 +841,7 @@ def make_verify_embed(
 
     elif log_type is VerifyLogType.INVALID_NICK:
         embed = discord.Embed(
-            title="❌ 인증 실패",
+            title="<:_red:1479810110632099972> 인증 실패",
             color=discord.Color.red(),
             description="존재하지 않는 로블록스 닉네임",
         )
@@ -919,41 +899,25 @@ def make_bulk_rank_summary_embed(
     executor: discord.abc.User | discord.Member | None = None,
 ) -> discord.Embed:
     if summary_type is RankSummaryType.BULK_PROMOTE:
-        title = "일괄 승진 완료"
+        title = "<:Chack_blue:1479810189434683402> 일괄 승진 완료"
         color = discord.Color.green()
         desc = "여러 멤버 승진 작업이 완료되었습니다."
     else:
-        title = "일괄 강등 완료"
+        title = "<:Chack_blue:1479810189434683402> 일괄 강등 완료"
         color = discord.Color.red()
         desc = "여러 멤버 강등 작업이 완료되었습니다." 
 
     embed = discord.Embed(title=title, description=desc, color=color)
     embed.add_field(name="변경 역할", value=f"`{role_name}`", inline=False)
     embed.add_field(name="총 처리", value=f"{total}명", inline=True)
-    embed.add_field(name="성공", value=f"{success}명", inline=True)
-    embed.add_field(name="실패", value=f"{failed}명", inline=True) 
+    embed.add_field(name="<:Chack_blue:1479810189434683402> 성공", value=f"{success}명", inline=True)
+    embed.add_field(name="<:X_red:1479810084900044851> 실패", value=f"{failed}명", inline=True) 
 
     if executor:
         embed.add_field(name="실행자", value=executor.mention, inline=False) 
 
     embed.set_footer(text="Made By Lunar")
     return embed
-# ---------- 사용안하는 명령어 ---------- 
-
-DISABLED_COMMANDS = ["역할목록", "역할전체변경",
-"일괄닉네임변경", "장교역할"] 
-
-@bot.tree.interaction_check
-async def check(interaction: discord.Interaction): 
-
-    if interaction.command.name in DISABLED_COMMANDS:
-        await interaction.response.send_message(
-            "현재는 이용할 수 없습니다.",
-            ephemeral=True
-        )
-        return False 
-
-    return True
 # ---------- 슬래시 명령어 ---------- 
 # 인증
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
@@ -1119,16 +1083,7 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
                 role_info = results[0].get("role", {})
                 rank_name = role_info.get("name", "?")
                 rank_num = role_info.get("rank", 0)
-        
-        # Discord 닉네임 변경
-        new_nick = f"[{rank_name}] {roblox_nick}"
-        if len(new_nick) > 32:
-            new_nick = new_nick[:32]
-        
-        if member:
-            await member.edit(nick=new_nick)
-        
-        # 위관급/영관급 역할 부여
+
         is_junior, is_senior = check_is_officer(rank_num, rank_name)
         
         officer_role_id = get_officer_role_id(interaction.guild.id)
@@ -1149,7 +1104,7 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
     embed = discord.Embed(
         title="강제인증 완료",
         color=discord.Color.green(),
-        description=f"{user.mention} 을(를) {roblox_nick}로 인증 처리했습니다.\nDiscord 닉: `{new_nick}`"
+        description=f"{user.mention} 을(를) {roblox_nick}로 인증 처리했습니다."
     )
     send_log_to_web(
         guild_id=interaction.guild.id,
@@ -1206,12 +1161,12 @@ async def bulk_force_verify(interaction: discord.Interaction):
     # 진행 상황 엠베드 (로그 채널)
     if log_channel:
         embed = discord.Embed(
-            title="일괄 강제인증 시작",
+            title="<:Chack_blue:1479810189434683402> 일괄 강제인증 시작",
             description=f"대상 인원: {total}명",
             color=discord.Color.orange()
         )
-        embed.add_field(name="성공", value=str(success))
-        embed.add_field(name="실패", value=str(fail))
+        embed.add_field(name="<:Chack_blue:1479810189434683402> 성공", value=str(success))
+        embed.add_field(name="<:X_red:1479810084900044851> 실패", value=str(fail))
         embed.set_footer(text=f"요청자: {interaction.user} ({interaction.user.id})")
         progress_msg = await log_channel.send(embed=embed)
     else:
@@ -1281,13 +1236,13 @@ async def bulk_force_verify(interaction: discord.Interaction):
     conn.commit()
 
     # 최종 응답
-    result_text = f"일괄 강제인증 완료.\n대상: {total}명\n성공: {success}명\n실패: {fail}명"
+    result_text = f"대상: {total}명\n<:Chack_blue:1479810189434683402> 성공: {success}명\n<:X_red:1479810084900044851>  실패: {fail}명"
     await interaction.followup.send(result_text)
 
     # 최종 로그 엠베드
     if log_channel:
         final_embed = discord.Embed(
-            title="일괄 강제인증 완료",
+            title="<:Chack_blue:1479810189434683402> 일괄 강제인증 완료",
             description=result_text,
             color=discord.Color.green()
         )
@@ -1956,95 +1911,95 @@ async def sync_commands(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"동기화 중 오류: {e}", ephemeral=True) 
 
-@bot.tree.command(
-    name="일괄닉네임변경",
-    description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)"
-)
-@app_commands.guilds(discord.Object(id=GUILD_ID)) 
+# @bot.tree.command(
+#     name="일괄닉네임변경",
+#     description="인증된 유저의 닉네임을 [랭크] 본닉 형식으로 변경합니다. (관리자)"
+# )
+# @app_commands.guilds(discord.Object(id=GUILD_ID)) 
 
-async def bulk_nickname_change(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
-        return 
+# async def bulk_nickname_change(interaction: discord.Interaction):
+#     if not is_admin(interaction.user):
+#         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+#         return 
 
-    await interaction.response.defer(ephemeral=True) 
+#     await interaction.response.defer(ephemeral=True) 
 
-    try:
-        # 인증된 유저 목록
-        cursor.execute(
-            "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
-            (interaction.guild.id,),
-        )
-        users_data = cursor.fetchall() 
+#     try:
+#         # 인증된 유저 목록
+#         cursor.execute(
+#             "SELECT discord_id, roblox_nick FROM users WHERE guild_id=? AND verified=1",
+#             (interaction.guild.id,),
+#         )
+#         users_data = cursor.fetchall() 
 
-        if not users_data:
-            await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
-            return 
+#         if not users_data:
+#             await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
+#             return 
 
-        # 모든 유저의 현재 랭크 조회
-        usernames = [row[1] for row in users_data] 
+#         # 모든 유저의 현재 랭크 조회
+#         usernames = [row[1] for row in users_data] 
 
-        resp = requests.post(
-            f"{RANK_API_URL_ROOT}/bulk-status",
-            json={"usernames": usernames},
-            headers=_rank_api_headers(),
-            timeout=60,
-        ) 
+#         resp = requests.post(
+#             f"{RANK_API_URL_ROOT}/bulk-status",
+#             json={"usernames": usernames},
+#             headers=_rank_api_headers(),
+#             timeout=60,
+#         ) 
 
-        if resp.status_code != 200:
-            await interaction.followup.send(
-                f"랭크 조회 실패 (HTTP {resp.status_code})", ephemeral=True
-            )
-            return 
+#         if resp.status_code != 200:
+#             await interaction.followup.send(
+#                 f"랭크 조회 실패 (HTTP {resp.status_code})", ephemeral=True
+#             )
+#             return 
 
-        data = resp.json() 
+#         data = resp.json() 
 
-        # username -> rank_name 매핑
-        rank_map = {}
-        for r in data.get("results", []):
-            if r.get("success"):
-                role_info = r.get("role", {}) or {}
-                rank_map[r["username"]] = role_info.get("name", "?") 
+#         # username -> rank_name 매핑
+#         rank_map = {}
+#         for r in data.get("results", []):
+#             if r.get("success"):
+#                 role_info = r.get("role", {}) or {}
+#                 rank_map[r["username"]] = role_info.get("name", "?") 
 
-        updated = 0
-        failed = 0 
+#         updated = 0
+#         failed = 0 
 
-        for discord_id, roblox_nick in users_data:
-            try:
-                member = interaction.guild.get_member(discord_id)
-                if not member:
-                    failed += 1
-                    continue 
+#         for discord_id, roblox_nick in users_data:
+#             try:
+#                 member = interaction.guild.get_member(discord_id)
+#                 if not member:
+#                     failed += 1
+#                     continue 
 
-                rank_name = rank_map.get(roblox_nick, "?") or "?" 
+#                 rank_name = rank_map.get(roblox_nick, "?") or "?" 
 
-                # ROKA | 육군 → 육군
-                if " | " in rank_name:
-                    rank_name = rank_name.split(" | ")[-1] 
+#                 # ROKA | 육군 → 육군
+#                 if " | " in rank_name:
+#                     rank_name = rank_name.split(" | ")[-1] 
 
-                new_nick = f"[{rank_name}] {roblox_nick}" 
+#                 new_nick = f"[{rank_name}] {roblox_nick}" 
 
-                if len(new_nick) > 32:
-                    new_nick = new_nick[:32] 
+#                 if len(new_nick) > 32:
+#                     new_nick = new_nick[:32] 
 
-                await member.edit(nick=new_nick)
-                updated += 1 
+#                 await member.edit(nick=new_nick)
+#                 updated += 1 
 
-            except Exception as e:
-                print(f"닉네임 변경 실패 {roblox_nick}: {e}")
-                failed += 1 
+#             except Exception as e:
+#                 print(f"닉네임 변경 실패 {roblox_nick}: {e}")
+#                 failed += 1 
 
-        embed = discord.Embed(
-            title="일괄 닉네임 변경 완료",
-            color=discord.Color.blue(),
-        )
-        embed.add_field(name="성공", value=str(updated), inline=True)
-        embed.add_field(name="실패", value=str(failed), inline=True)
-        embed.add_field(name="형식", value="[랭크] 로블 본닉", inline=False)
-        await interaction.followup.send(embed=embed, ephemeral=True) 
+#         embed = discord.Embed(
+#             title="일괄 닉네임 변경 완료",
+#             color=discord.Color.blue(),
+#         )
+#         embed.add_field(name="성공", value=str(updated), inline=True)
+#         embed.add_field(name="실패", value=str(failed), inline=True)
+#         embed.add_field(name="형식", value="[랭크] 로블 본닉", inline=False)
+#         await interaction.followup.send(embed=embed, ephemeral=True) 
 
-    except Exception as e:
-        await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True) 
+#     except Exception as e:
+#         await interaction.followup.send(f"요청 중 에러 발생: {e}", ephemeral=True) 
 
 @bot.tree.command(name="로그채널지정", description="로그 채널을 설정합니다. (관리자)")
 @app_commands.describe(
@@ -2156,60 +2111,60 @@ async def view_blacklist(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed, ephemeral=True) 
 
-@bot.tree.command(name="역할전체변경", description="모든 유저의 역할을 한 역할로 통일합니다. (위험)")
-async def set_all_role(interaction: discord.Interaction):
-    guild = interaction.guild
-    if guild.id != GUILD_ID:
-        await interaction.response.send_message("이 명령어는 지정된 서버에서만 사용할 수 있습니다.", ephemeral=True)
-        return 
+# @bot.tree.command(name="역할전체변경", description="모든 유저의 역할을 한 역할로 통일합니다. (위험)")
+# async def set_all_role(interaction: discord.Interaction):
+#     guild = interaction.guild
+#     if guild.id != GUILD_ID:
+#         await interaction.response.send_message("이 명령어는 지정된 서버에서만 사용할 수 있습니다.", ephemeral=True)
+#         return 
 
-    target_role = guild.get_role(TARGET_ROLE_ID)
-    if not target_role:
-        await interaction.response.send_message("대상 역할을 찾을 수 없습니다.", ephemeral=True)
-        return 
+#     target_role = guild.get_role(TARGET_ROLE_ID)
+#     if not target_role:
+#         await interaction.response.send_message("대상 역할을 찾을 수 없습니다.", ephemeral=True)
+#         return 
 
-    await interaction.response.send_message("모든 멤버 역할 변경 시작...", ephemeral=True) 
+#     await interaction.response.send_message("모든 멤버 역할 변경 시작...", ephemeral=True) 
 
-    success = 0
-    failed = 0
-    skipped = 0 
+#     success = 0
+#     failed = 0
+#     skipped = 0 
 
-    for member in guild.members:
-        # 봇은 스킵
-        if member.bot:
-            continue 
+#     for member in guild.members:
+#         # 봇은 스킵
+#         if member.bot:
+#             continue 
 
-        # 봇 위상보다 높은/같은 멤버는 어차피 못 건드리니 스킵[web:80]
-        if guild.me.top_role <= member.top_role:
-            skipped += 1
-            continue 
+#         # 봇 위상보다 높은/같은 멤버는 어차피 못 건드리니 스킵[web:80]
+#         if guild.me.top_role <= member.top_role:
+#             skipped += 1
+#             continue 
 
-        try:
-            # @everyone 역할은 항상 첫 번째, 제거하면 안 됨[web:58]
-            everyone = member.roles[0]
-            new_roles = [everyone, target_role] 
+#         try:
+#             # @everyone 역할은 항상 첫 번째, 제거하면 안 됨[web:58]
+#             everyone = member.roles[0]
+#             new_roles = [everyone, target_role] 
 
-            await member.edit(roles=new_roles)
-            success += 1 
+#             await member.edit(roles=new_roles)
+#             success += 1 
 
-            # 레이트리밋 완화용 (인원 많으면 조절)
-            await asyncio.sleep(0.3) 
+#             # 레이트리밋 완화용 (인원 많으면 조절)
+#             await asyncio.sleep(0.3) 
 
-        except discord.Forbidden:
-            # 권한 부족(역할 위상 등) → 그 멤버만 예외
-            print(f"{member} 권한 부족으로 스킵")
-            failed += 1
-        except Exception as e:
-            print(f"{member} 역할 변경 실패: {e}")
-            failed += 1 
+#         except discord.Forbidden:
+#             # 권한 부족(역할 위상 등) → 그 멤버만 예외
+#             print(f"{member} 권한 부족으로 스킵")
+#             failed += 1
+#         except Exception as e:
+#             print(f"{member} 역할 변경 실패: {e}")
+#             failed += 1 
 
-    await interaction.followup.send(
-        f"역할 변경 완료\n"
-        f"성공: {success}명\n"
-        f"실패: {failed}명\n"
-        f"위상/조건으로 스킵: {skipped}명",
-        ephemeral=True
-    ) 
+#     await interaction.followup.send(
+#         f"역할 변경 완료\n"
+#         f"성공: {success}명\n"
+#         f"실패: {failed}명\n"
+#         f"위상/조건으로 스킵: {skipped}명",
+#         ephemeral=True
+#     ) 
 
 ALLOWED_GUILD_ID = 1461636782176075830
 SECURITY_LOG_CHANNEL_ID = 1468191965052141629

@@ -2616,18 +2616,18 @@ async def force_leave(guild: discord.Guild) -> None:
         await guild.leave()
     except Exception as e:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
-
+        
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})") 
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
     # 🔒 시작 시 서버 강제 검사
     for guild in bot.guilds:
-        if guild.id != ALLOWED_GUILD_IDS:
-            print(f"Unauthorized guild found on startup: {guild.name}")
-            await force_leave(guild) 
+        if guild.id not in ALLOWED_GUILD_IDS:
+            print(f"Unauthorized guild found on startup: {guild.name} ({guild.id})")
+            await force_leave(guild)
 
-    # 슬래시 커맨드 동기화
+    # 슬래시 커맨드 동기화 
     try:
         if GUILD_ID > 0:
             guild_obj = discord.Object(id=GUILD_ID)

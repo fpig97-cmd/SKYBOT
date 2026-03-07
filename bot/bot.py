@@ -2422,14 +2422,27 @@ async def gamble(interaction: discord.Interaction, amount: int):
 
     r = random.random()
 
-    if r <= 0.01:
-        multi = 5
-    elif r <= 0.06:
-        multi = 4
-    elif r <= 0.31:
-        multi = 3
-    else:
+    if r <= 0.50:
+        # 패배
+        cur.execute(
+            "UPDATE economy SET money = money - ? WHERE user_id=?",
+            (amount, interaction.user.id)
+        )
+        conn.commit()
+
+        await interaction.response.send_message(
+            f"💀 도박 실패\n잃은 돈 : {amount}"
+        )
+        return
+
+    elif r <= 0.85:
         multi = 2
+    elif r <= 0.95:
+        multi = 3
+    elif r <= 0.99:
+        multi = 4
+    else:
+        multi = 5
 
     win = amount * multi
 
@@ -2441,10 +2454,9 @@ async def gamble(interaction: discord.Interaction, amount: int):
     conn.commit()
 
     await interaction.response.send_message(
-        f"🎰 도박 결과\n배율 : x{multi}\n획득 : {win}"
+        f"🎰 도박 성공!\n배율 : x{multi}\n획득 : {win}"
     )
-
-
+    
 # =========================
 # 아이템샵
 # =========================

@@ -2249,24 +2249,27 @@ async def view_blacklist(interaction: discord.Interaction):
 #         ephemeral=True
 #     )
 
-# -- !명령어 --
-
-import discord
-from discord.ext import commands
+# -- 경제 명령어 --
 import sqlite3
 import random
 import time
 
+# =========================
+# 봇 기본 설정
+# =========================
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ===== DB =====
+# =========================
+# 데이터베이스
+# =========================
 
-econ = sqlite3.connect("economy.db")
-ecur = econ.cursor()
+conn = sqlite3.connect("economy.db")
+cur = conn.cursor()
 
-ecur.execute("""
-CREATE TABLE IF NOT EXISTS economy (
+cur.execute("""
+CREATE TABLE IF NOT EXISTS economy(
     user_id INTEGER PRIMARY KEY,
     money INTEGER DEFAULT 0,
     last_daily INTEGER DEFAULT 0,
@@ -2275,41 +2278,47 @@ CREATE TABLE IF NOT EXISTS economy (
 )
 """)
 
-econ.commit()
+conn.commit()
 
 
 def get_user(user_id):
 
-    ecur.execute("SELECT * FROM economy WHERE user_id=?", (user_id,))
-    data = ecur.fetchone()
+    cur.execute("SELECT * FROM economy WHERE user_id=?", (user_id,))
+    data = cur.fetchone()
 
     if data is None:
-        ecur.execute(
-            "INSERT INTO economy (user_id, money, last_daily, exp, level) VALUES (?,0,0,0,1)",
+        cur.execute(
+            "INSERT INTO economy (user_id,money,last_daily,exp,level) VALUES (?,0,0,0,1)",
             (user_id,)
         )
-        econ.commit()
-
+        conn.commit()
         return (user_id,0,0,0,1)
 
     return data
 
 
-# ===== 아이템샵 =====
+# =========================
+# 아이템샵 (역할 지급)
+# =========================
 
 SHOP_ITEMS = {
+
     "VIP": {
         "price": 1000,
         "role_id": 123456789012345678
     },
+
     "GOLD": {
         "price": 3000,
         "role_id": 123456789012345678
     }
+
 }
 
 
-# ===== EXP =====
+# =========================
+# EXP 시스템
+# =========================
 
 xp_cooldown = {}
 
@@ -2324,7 +2333,6 @@ async def on_message(message):
 
     if user_id in xp_cooldown:
         if now - xp_cooldown[user_id] < 30:
-            await bot.process_commands(message)
             return
 
     xp_cooldown[user_id] = now
@@ -2346,69 +2354,70 @@ async def on_message(message):
 
         reward = level * 50
 
-        ecur.execute(
+        cur.execute(
             "UPDATE economy SET money = money + ? WHERE user_id=?",
             (reward, user_id)
         )
 
-        await message.channel.send(
-            f"🎉 {message.author.mention} 레벨업!\n"
-            f"⭐ 레벨 : {level}\n"
-            f"💰 보너스 : {reward}"
-        )
-
-    ecur.execute(
+    cur.execute(
         "UPDATE economy SET exp=?, level=? WHERE user_id=?",
         (exp, level, user_id)
     )
 
-    econ.commit()
-
-    await bot.process_commands(message)
+    conn.commit()
 
 
-# ===== 돈 =====
+# =========================
+# 슬래시 명령어
+# =========================
 
-@bot.command()
-async def 돈(ctx):
+@bot.tree.command(name="돈", description="24시간마다 돈 받기")
+async def daily(interaction: discord.Interaction):
 
-    user = get_user(ctx.author.id)
-
+    user = get_user(interaction.user.id)
     now = int(time.time())
 
     if now - user[2] < 86400:
+
         remain = 86400 - (now - user[2])
         h = remain // 3600
         m = (remain % 3600) // 60
 
-        await ctx.send(f"⏳ {h}시간 {m}분 후 가능")
+        await interaction.response.send_message(
+            f"⏳ {h}시간 {m}분 후 다시 받을 수 있습니다."
+        )
         return
 
     reward = random.randint(100,300)
 
-    ecur.execute(
+    cur.execute(
         "UPDATE economy SET money = money + ?, last_daily=? WHERE user_id=?",
-        (reward, now, ctx.author.id)
+        (reward, now, interaction.user.id)
     )
 
-    econ.commit()
+    conn.commit()
 
-    await ctx.send(f"💰 {reward}원 지급")
+    await interaction.response.send_message(
+        f"💰 {reward}원을 받았습니다!"
+    )
 
 
-# ===== 도박 =====
+# =========================
+# 도박
+# =========================
 
-@bot.command()
-async def 도박(ctx, amount:int):
+@bot.tree.command(name="도박", description="돈을 걸고 도박합니다")
+@app_commands.describe(amount="도박 금액")
+async def gamble(interaction: discord.Interaction, amount: int):
 
-    user = get_user(ctx.author.id)
+    user = get_user(interaction.user.id)
 
     if amount <= 0:
-        await ctx.send("금액 오류")
+        await interaction.response.send_message("금액 오류")
         return
 
     if user[1] < amount:
-        await ctx.send("돈 부족")
+        await interaction.response.send_message("돈이 부족합니다")
         return
 
     r = random.random()
@@ -2424,80 +2433,83 @@ async def 도박(ctx, amount:int):
 
     win = amount * multi
 
-    ecur.execute(
+    cur.execute(
         "UPDATE economy SET money = money + ? WHERE user_id=?",
-        (win, ctx.author.id)
+        (win, interaction.user.id)
     )
 
-    econ.commit()
+    conn.commit()
 
-    await ctx.send(
-        f"🎰 도박 결과\n"
-        f"배율 : x{multi}\n"
-        f"획득 : {win}"
+    await interaction.response.send_message(
+        f"🎰 도박 결과\n배율 : x{multi}\n획득 : {win}"
     )
-    
-# ===== 아이템샵 =====
 
-@bot.command()
-async def 아이템샵(ctx):
+
+# =========================
+# 아이템샵
+# =========================
+
+@bot.tree.command(name="아이템샵", description="아이템 상점")
+async def shop(interaction: discord.Interaction):
 
     embed = discord.Embed(title="🛒 아이템샵")
 
     for name,data in SHOP_ITEMS.items():
+
         embed.add_field(
             name=name,
             value=f"가격 : {data['price']}",
             inline=False
         )
 
-    embed.set_footer(text="구매 : !구매 아이템")
-
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-# ===== 구매 =====
+# =========================
+# 구매
+# =========================
 
-@bot.command()
-async def 구매(ctx, item_name:str):
+@bot.tree.command(name="구매", description="아이템 구매")
+@app_commands.describe(item="아이템 이름")
+async def buy(interaction: discord.Interaction, item: str):
 
-    item = SHOP_ITEMS.get(item_name)
+    item_data = SHOP_ITEMS.get(item)
 
-    if item is None:
-        await ctx.send("없는 아이템")
+    if item_data is None:
+        await interaction.response.send_message("존재하지 않는 아이템입니다")
         return
 
-    user = get_user(ctx.author.id)
+    user = get_user(interaction.user.id)
 
-    if user[1] < item["price"]:
-        await ctx.send("돈 부족")
+    if user[1] < item_data["price"]:
+        await interaction.response.send_message("돈이 부족합니다")
         return
 
-    role = ctx.guild.get_role(item["role_id"])
+    role = interaction.guild.get_role(item_data["role_id"])
 
-    if role in ctx.author.roles:
-        await ctx.send("이미 있음")
-        return
+    await interaction.user.add_roles(role)
 
-    await ctx.author.add_roles(role)
-
-    ecur.execute(
+    cur.execute(
         "UPDATE economy SET money = money - ? WHERE user_id=?",
-        (item["price"], ctx.author.id)
+        (item_data["price"], interaction.user.id)
     )
 
-    econ.commit()
+    conn.commit()
 
-    await ctx.send(f"✅ {item_name} 구매 완료")
+    await interaction.response.send_message(
+        f"✅ {item} 구매 완료!"
+    )
 
 
-# ===== 유저 =====
+# =========================
+# 유저 정보
+# =========================
 
-@bot.command()
-async def 유저(ctx, member:discord.Member=None):
+@bot.tree.command(name="유저", description="유저 정보 확인")
+async def userinfo(interaction: discord.Interaction, member: discord.Member=None):
 
     if member is None:
-        member = ctx.author
+        member = interaction.user
 
     user = get_user(member.id)
 
@@ -2509,27 +2521,29 @@ async def 유저(ctx, member:discord.Member=None):
 
     embed.add_field(name="💰 돈", value=user[1])
     embed.add_field(name="⭐ 레벨", value=level)
-    embed.add_field(name="EXP", value=f"{exp}/{need}")
+    embed.add_field(name="📊 EXP", value=f"{exp}/{need}")
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-# ===== 랭킹 =====
+# =========================
+# 랭킹
+# =========================
 
-@bot.command()
-async def 랭킹(ctx):
+@bot.tree.command(name="랭킹", description="레벨 랭킹")
+async def ranking(interaction: discord.Interaction):
 
-    ecur.execute(
+    cur.execute(
         "SELECT user_id, level, exp FROM economy ORDER BY level DESC, exp DESC LIMIT 10"
     )
 
-    rows = ecur.fetchall()
+    rows = cur.fetchall()
 
     text = ""
 
     for i,(uid,level,exp) in enumerate(rows, start=1):
 
-        member = ctx.guild.get_member(uid)
+        member = interaction.guild.get_member(uid)
 
         if member:
             name = member.name
@@ -2543,7 +2557,21 @@ async def 랭킹(ctx):
         description=text
     )
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
+
+
+# =========================
+# 봇 준비
+# =========================
+
+@bot.event
+async def on_ready():
+
+    await bot.tree.sync()
+    print(f"{bot.user} 로그인 완료")
+
+
+bot.run("YOUR_BOT_TOKEN")
     
 # -- 이벤트 --
 ALLOWED_GUILD_IDS = [

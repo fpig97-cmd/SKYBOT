@@ -2570,9 +2570,6 @@ async def on_ready():
     await bot.tree.sync()
     print(f"{bot.user} 로그인 완료")
 
-
-bot.run("YOUR_BOT_TOKEN")
-    
 # -- 이벤트 --
 ALLOWED_GUILD_IDS = [
     1461636782176075830,

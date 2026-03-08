@@ -7,7 +7,8 @@ import sqlite3
 import random
 import string
 from datetime import datetime, timedelta, timezone
-from typing import Optional 
+from typing import Optional
+import psutil
 
 import aiohttp
 import discord
@@ -4056,7 +4057,42 @@ async def force_leave(guild: discord.Guild) -> None:
         await guild.leave()
     except Exception as e:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
-        
+
+@tasks.loop(seconds=5)
+async def update_status():
+    channel = bot.get_channel(STATUS_CHANNEL_ID)
+    if not channel:
+        return
+
+    uptime = int(time.time() - bot_start_time)
+    hours = uptime // 3600
+    minutes = (uptime % 3600) // 60
+    seconds = uptime % 60
+
+    status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
+    cpu_usage = psutil.cpu_percent(interval=1)
+    memory_usage = psutil.virtual_memory().percent
+    total_users = sum(g.member_count for g in bot.guilds)
+    command_count = len(bot.commands)
+    ping = round(bot.latency * 1000)
+
+    embed = discord.Embed(
+        title="🤖 봇 상태 (자동 갱신)",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
+    embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
+    embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
+    embed.add_field(name="👥 총 유저 수", value=f"{total_users}", inline=True)
+    embed.add_field(name="📦 명령어 수", value=f"{command_count}", inline=True)
+    embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
+    embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
+    embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
+    embed.add_field(name="🔗 서포트 서버", value=SUPPORT_SERVER, inline=False)
+
+    await channel.send(embed=embed)
+    
 @bot.event
 async def on_app_command_completion(
     interaction: discord.Interaction,
@@ -4102,10 +4138,12 @@ async def on_app_command_completion(
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     
+    # 허용되지 않은 서버 강제 탈퇴
     for guild in bot.guilds:
         if guild.id not in ALLOWED_GUILD_IDS:
             await force_leave(guild)
     
+    # 트리 명령어 동기화
     try:
         if GUILD_ID > 0:
             await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
@@ -4113,11 +4151,16 @@ async def on_ready():
     except Exception as e:
         print("동기화 실패:", e)
     
+    # 기존 백그라운드 태스크 시작
     if not rank_log_task.is_running():
         rank_log_task.start()
         
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
+    
+    # 🔹 15초마다 상태 갱신 루프 시작
+    if not update_status.is_running():
+        update_status.start()
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 

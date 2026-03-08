@@ -29,17 +29,6 @@ from fastapi import FastAPI
 import discord
 from discord.ext import commands
 
-bot_start_time = time.time()
-BOT_STATUS = "정상"
-
-STATUS_EMOJIS = {
-    "정상": "🟢",
-    "서비스 준비중": "🟡",
-    "중지": "🔴"
-}
-
-SUPPORT_SERVER = "https://discord.gg/서포트서버링크"
-
 # FastAPI 앱 생성
 app = FastAPI()
 
@@ -1994,71 +1983,6 @@ async def set_admin_roles(
                 "해당 역할은 관리자 목록에 없습니다.",
                 ephemeral=True
     )
-# 봇상태
-@bot.tree.command(name="봇정보", description="봇 정보를 확인합니다")
-async def bot_info(interaction: discord.Interaction):
-
-    uptime = int(time.time() - bot_start_time)
-
-    hours = uptime // 3600
-    minutes = (uptime % 3600) // 60
-    seconds = uptime % 60
-
-    status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
-
-    embed = discord.Embed(
-        title="🤖 봇 정보",
-        color=discord.Color.blue()
-    )
-    
-    embed.add_field(
-        name="⏱ 업타임",
-        value=f"{hours}시간 {minutes}분 {seconds}초",
-        inline=False
-    )
-
-    embed.add_field(
-        name="📡 봇 상태",
-        value=f"{status_emoji} {BOT_STATUS}",
-        inline=False
-    )
-
-    embed.add_field(
-        name="🌍 서버 수",
-        value=f"{len(bot.guilds)}개",
-        inline=False
-    )
-
-    embed.add_field(
-        name="🔗 서포트 서버",
-        value=SUPPORT_SERVER,
-        inline=False
-    )
-    
-    embed.set_footer(text=f"요청자: {interaction.user}")
-
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="봇상태지정", description="봇 상태를 변경합니다 (관리자)")
-@app_commands.describe(status="봇 상태")
-@app_commands.choices(status=[
-    app_commands.Choice(name="정상", value="정상"),
-    app_commands.Choice(name="서비스 준비중", value="서비스 준비중"),
-    app_commands.Choice(name="중지", value="중지")
-])
-async def set_bot_status(interaction: discord.Interaction, status: app_commands.Choice[str]):
-
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
-        return
-
-    global BOT_STATUS
-    BOT_STATUS = status.value
-
-    await interaction.response.send_message(
-        f"봇 상태가 **{BOT_STATUS}** 로 변경되었습니다.",
-        ephemeral=True
-    )
 # 로그
 @bot.tree.command(name="명령어로그", description="명령어 사용 기록을 확인합니다. (관리자)")
 @app_commands.describe(페이지크기="한 페이지에 표시할 개수 (기본 10)")
@@ -2826,7 +2750,8 @@ async def warn(
     관리자="관리자 로그 채널",
     보안="보안 로그 채널",
     개발자="개발자 로그 채널",
-    아이템="아이템 구매 로그 채널",  # 🔹 추가
+    아이템="아이템 구매 로그 채널",
+    공지="공지 로그 채널"
 )
 async def set_log_channels(
     interaction: discord.Interaction,
@@ -2835,7 +2760,8 @@ async def set_log_channels(
     관리자: discord.TextChannel | None = None,
     보안: discord.TextChannel | None = None,
     개발자: discord.TextChannel | None = None,
-    아이템: discord.TextChannel | None = None,  # 🔹 추가
+    아이템: discord.TextChannel | None = None,
+    공지: discord.TextChannel | None = None,
 ):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
@@ -2846,7 +2772,7 @@ async def set_log_channels(
         await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
         return
 
-    changed: list[str] = []
+    changed = []
 
     if 인증 is not None:
         set_log_channel(guild.id, "verify", 인증.id)
@@ -2868,18 +2794,23 @@ async def set_log_channels(
         set_log_channel(guild.id, "dev", 개발자.id)
         changed.append(f"개발자: {개발자.mention}")
 
-    if 아이템 is not None:  # 🔹 추가
+    if 아이템 is not None:
         set_log_channel(guild.id, "item", 아이템.id)
         changed.append(f"아이템: {아이템.mention}")
+
+    if 공지 is not None:
+        set_log_channel(guild.id, "announce", 공지.id)
+        changed.append(f"공지: {공지.mention}")
 
     if not changed:
         await interaction.response.send_message(
             "변경된 채널이 없습니다. 최소 한 개 이상 지정해 주세요.",
-            ephemeral=True,
+            ephemeral=True
         )
         return
 
     msg = "다음 로그 채널이 설정되었습니다:\n" + "\n".join(changed)
+
     await interaction.response.send_message(msg, ephemeral=True)
 
 @bot.tree.command(name="블랙리스트", description="블랙리스트 그룹을 관리합니다. (관리자)")
@@ -4099,4 +4030,182 @@ async def on_guild_join(guild: discord.Guild):
                 f"인원수: {guild.member_count}\n"
                 f"서버 주인: {owner_text}\n"
                 f"생성일(KST): {created_text}\n"
-                f"교집합 인원: {len(shared_member
+                f"교집합 인원: {len(shared_members)}명\n\n"
+                "봇이 즉시 서버를 떠납니다."
+            ),
+            color=discord.Color.red(),
+            timestamp=now_kst
+        )
+
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+
+        await log_channel.send(embed=embed, file=member_file)
+
+    # =========================
+    # ❌ 서버 탈퇴
+    # =========================
+    await guild.leave()
+
+# ---------- 봇 시작 ----------
+# 🔒 허가되지 않은 길드 강제 탈퇴 함수
+async def force_leave(guild: discord.Guild) -> None:
+    """허가되지 않은 길드에서 나가고 로그 남김."""
+    try:
+        print(f"[FORCE_LEAVE] Leaving unauthorized guild: {guild.name} ({guild.id})")
+        await guild.leave()
+    except Exception as e:
+        print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
+        
+@bot.event
+async def on_app_command_completion(
+    interaction: discord.Interaction,
+    command: discord.app_commands.Command,
+):
+    try:
+        if not interaction.guild:
+            return
+
+        guild_id = interaction.guild.id
+        user = interaction.user
+
+        # 전체 명령어 문자열 예시: "/구매 이름: VIP"
+        options = []
+        if interaction.namespace:
+            for k, v in interaction.namespace.__dict__.items():
+                options.append(f"{k}={v}")
+        full_str = f"/{command.qualified_name}"
+        if options:
+            full_str += " " + " ".join(options)
+
+        cursor.execute(
+            """
+            INSERT INTO command_logs(
+                guild_id, user_id, user_name,
+                command_name, command_full, created_at
+            )
+            VALUES(?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                guild_id,
+                user.id,
+                f"{user.name}#{user.discriminator}",
+                command.qualified_name,
+                full_str,
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        add_error_log(f"command_log: {repr(e)}")
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
+    for guild in bot.guilds:
+        if guild.id not in ALLOWED_GUILD_IDS:
+            await force_leave(guild)
+    
+    try:
+        if GUILD_ID > 0:
+            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        await bot.tree.sync()
+    except Exception as e:
+        print("동기화 실패:", e)
+    
+    if not rank_log_task.is_running():
+        rank_log_task.start()
+        
+    if not sync_all_nicknames_task.is_running():
+        sync_all_nicknames_task.start()
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction): 
+
+    if interaction.type == discord.InteractionType.application_command: 
+
+        for cmd in DISABLED_COMMANDS:
+            if interaction.data["name"] == cmd:
+                await interaction.response.send_message(
+                    "현재는 이용할 수 없습니다.",
+                    ephemeral=True
+                )
+                return
+            
+# ==================== FastAPI 엔드포인트 ====================
+@app.get("/api/errors")
+def get_errors():
+    """최근 에러 로그 반환"""
+    try:
+        recent_errors = error_logs[-20:] if error_logs else []  # 최근 20개
+        
+        formatted = []
+        for err in recent_errors:
+            ts = err.get("timestamp")
+            if ts:
+                time_str = ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, 'strftime') else str(ts)
+            else:
+                time_str = "N/A"
+            
+            formatted.append({
+                "timestamp": time_str,
+                "message": err.get("message", "Unknown error")
+            })
+        
+        return formatted
+    except Exception as e:
+        print(f"[API] Error logs error: {e}")
+        return []
+
+@app.get("/")
+def root():
+    return {"status": "SKY ARMY BOT", "ready": bot.is_ready()}
+
+@app.get("/api/bot-stats")
+def bot_stats():
+    """Bot 통계 반환"""
+    try:
+        guilds_count = len(bot.guilds)
+        
+        # 경고 기록 수 계산
+        cursor.execute("SELECT COUNT(*) FROM warnings")
+        warn_count = cursor.fetchone()[0]
+        
+        # 인증된 유저 수
+        cursor.execute("SELECT COUNT(DISTINCT discordid) FROM users WHERE verified=1")
+        verified_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(DISTINCT discordid) FROM forcedverified")
+        forced_count = cursor.fetchone()[0]
+        
+        total_users = verified_count + forced_count
+        
+        print(f"[API] Stats: {guilds_count} guilds, {total_users} users, {warn_count} warns")
+        
+        return {
+            "guilds": guilds_count,
+            "verified_users": total_users,
+            "warn_records": warn_count,
+        }
+    except Exception as e:
+        print(f"[API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"guilds": 0, "verified_users": 0, "warn_records": 0}
+# ========================================================
+
+if __name__ == "__main__":
+    import asyncio
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+    
+    async def run_both():
+        config = Config()
+        config.bind = [f"0.0.0.0:{int(os.getenv('PORT', 8080))}"]
+        
+        await asyncio.gather(
+            bot.start(TOKEN),
+            serve(app, config)
+        )
+    
+    asyncio.run(run_both())

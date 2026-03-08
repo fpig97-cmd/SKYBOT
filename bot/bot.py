@@ -31,47 +31,14 @@ from discord.ext import commands
 from threading import Thread
 import uvicorn
 
+# FastAPI 앱 생성
+app = FastAPI()
 
 intents = discord.Intents.default()
 intents.members = True 
 bot = commands.Bot(command_prefix="!", intents=intents) 
 
-# FastAPI 앱 생성
-app = FastAPI()
 
-# 이 코드를 bot 정의 아래에 넣기
-# bot = commands.Bot(...) 다음에
-
-@app.get("/api/bot-stats")
-async def bot_stats():
-    """Bot 통계"""
-    print("=== BOT STATS API CALLED ===")  # ← 호출됐는지 확인
-    
-    try:
-        print(f"Bot ready: {bot.is_ready()}")
-        print(f"Guilds: {len(bot.guilds)}")
-        
-        guilds_count = len(bot.guilds)
-        
-        return {
-            "guilds": guilds_count,
-            "verified_users": guilds_count * 10,
-            "warn_records": 0,
-        }
-    except Exception as e:
-        print(f"Bot stats error: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()  # ← 전체 에러 출력
-        return {
-            "guilds": 0,
-            "verified_users": 0,
-            "warn_records": 0,
-        }
-
-def run_fastapi():
-    """FastAPI 서버를 별도 스레드에서 실행"""
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="critical")
 # =========================
 # 데이터베이스
 # =========================
@@ -3589,6 +3556,38 @@ async def ranking(
         color=discord.Color.gold(),
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
+# -- Fast API --
+
+@app.get("/api/bot-stats")
+async def bot_stats():
+    """Bot 통계"""
+    print("=== BOT STATS API CALLED ===")  # ← 호출됐는지 확인
+    
+    try:
+        print(f"Bot ready: {bot.is_ready()}")
+        print(f"Guilds: {len(bot.guilds)}")
+        
+        guilds_count = len(bot.guilds)
+        
+        return {
+            "guilds": guilds_count,
+            "verified_users": guilds_count * 10,
+            "warn_records": 0,
+        }
+    except Exception as e:
+        print(f"Bot stats error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()  # ← 전체 에러 출력
+        return {
+            "guilds": 0,
+            "verified_users": 0,
+            "warn_records": 0,
+        }
+
+def run_fastapi():
+    """FastAPI 서버를 별도 스레드에서 실행"""
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="critical")
 
 # -- 이벤트 --
 ALLOWED_GUILD_IDS = [

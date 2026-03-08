@@ -2571,17 +2571,6 @@ async def ranking(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-
-# =========================
-# 봇 준비
-# =========================
-
-@bot.event
-async def on_ready():
-
-    await bot.tree.sync()
-    print(f"{bot.user} 로그인 완료")
-
 # -- 이벤트 --
 ALLOWED_GUILD_IDS = [
     1461636782176075830,

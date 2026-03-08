@@ -4197,7 +4197,9 @@ async def force_leave(guild: discord.Guild) -> None:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
 
 @tasks.loop(seconds=5)
-async def update_status():
+@tasks.loop(seconds=15)
+async def update_status_loop():
+    global status_message_id
     if not status_channel_id:
         print("상태 채널 미지정")
         return
@@ -4207,6 +4209,7 @@ async def update_status():
         print("채널을 찾을 수 없음")
         return
 
+    # 봇 상태 정보
     uptime = int(time.time() - bot_start_time)
     hours = uptime // 3600
     minutes = (uptime % 3600) // 60
@@ -4218,7 +4221,7 @@ async def update_status():
     total_users = sum(g.member_count for g in bot.guilds)
     ping = round(bot.latency * 1000)
 
-    embed = discord.Embed(title="🤖 봇 상태", color=discord.Color.green())
+    embed = discord.Embed(title="🤖 봇 상태 (자동 갱신)", color=discord.Color.green())
     embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
     embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
     embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
@@ -4228,9 +4231,16 @@ async def update_status():
     embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
 
     try:
-        await channel.send(embed=embed)
+        if status_message_id:
+            # 기존 메시지 수정
+            msg = await channel.fetch_message(status_message_id)
+            await msg.edit(embed=embed)
+        else:
+            # 첫 메시지 전송 후 ID 저장
+            msg = await channel.send(embed=embed)
+            status_message_id = msg.id
     except Exception as e:
-        print(f"상태 전송 실패: {e}")
+        print(f"상태 전송/수정 실패: {e}")
     
 @bot.event
 async def on_app_command_completion(

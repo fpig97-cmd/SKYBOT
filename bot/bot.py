@@ -1082,7 +1082,7 @@ async def bulk_force_verify(interaction: discord.Interaction):
         await interaction.response.send_message("제작자만 사용할 수 있습니다.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=False)
+    await interaction.response.defer(ephemeral=True)
 
     # 로그 채널
     log_channel_id = get_log_channel(guild.id, "verify")

@@ -30,6 +30,9 @@ from fastapi import FastAPI
 import discord
 from discord.ext import commands
 
+from discord import Interaction
+from discord import app_commands
+
 # FastAPI 앱 생성
 app = FastAPI()
 

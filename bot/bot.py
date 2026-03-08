@@ -4277,33 +4277,35 @@ async def on_app_command_completion(
     except Exception as e:
         add_error_log(f"command_log: {repr(e)}")
 
+# ------------------------
+# 봇 준비 이벤트 (on_ready)
+# ------------------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    
-    # 허용되지 않은 서버 강제 탈퇴
+
+    # 🔹 허용되지 않은 서버 강제 탈퇴
     for guild in bot.guilds:
         if guild.id not in ALLOWED_GUILD_IDS:
-            await force_leave(guild)
-    
-    # 트리 명령어 동기화
+            await force_leave(guild)  # async 함수여야 함
+
+    # 🔹 트리 명령어 동기화
     try:
         if GUILD_ID > 0:
-            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        await bot.tree.sync()
+            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))  # 특정 길드 우선 동기화
+        await bot.tree.sync()  # 글로벌 명령어 동기화
     except Exception as e:
         print("동기화 실패:", e)
-    
-    # 기존 백그라운드 태스크 시작
+
+    # 🔹 기존 백그라운드 태스크 시작
     if not rank_log_task.is_running():
         rank_log_task.start()
-        
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
-    
-    # 🔹 15초마다 상태 갱신 루프 시작
+
+    # 🔹 15초마다 상태 갱신 루프 시작 (처음 메시지 보장)
     if not update_status.is_running():
-        update_status.start()
+        update_status.start()  # ⚠ tasks.loop는 start()만 사용, 괄호 붙이면 안 됨
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 

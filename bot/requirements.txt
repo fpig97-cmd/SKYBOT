@@ -4,3 +4,4 @@ hypercorn
 aiohttp
 requests
 python-dotenv
+psutil

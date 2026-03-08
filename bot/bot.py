@@ -72,7 +72,9 @@ async def bot_stats():
 
 # FastAPI를 별도 스레드에서 실행
 def run_fastapi():
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="critical")
+    """FastAPI 서버를 별도 스레드에서 실행"""
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="error")
+
 
 # =========================
 # 데이터베이스

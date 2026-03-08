@@ -31,6 +31,11 @@ from discord.ext import commands
 from threading import Thread
 import uvicorn
 
+
+intents = discord.Intents.default()
+intents.members = True 
+bot = commands.Bot(command_prefix="!", intents=intents) 
+
 # FastAPI 앱 생성
 app = FastAPI()
 
@@ -140,8 +145,6 @@ def is_already_verified(guild_id: int, user_id: int) -> bool:
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"  # 나중에 Railway 올리면 URL만 바꾸면 됨 
 
-intents = discord.Intents.default()
-intents.members = True 
 
 COMMANDS_DISABLED = False
 DISABLED_COMMANDS = ["일괄닉네임변경", "장교역할"] 
@@ -175,8 +178,6 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN이 .env에 설정되어 있지 않습니다.") 
 
 intents = discord.Intents.all() 
-
-bot = commands.Bot(command_prefix="!", intents=intents) 
 
 error_logs: list[dict] = []
 MAX_LOGS = 50 

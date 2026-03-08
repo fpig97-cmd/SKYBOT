@@ -144,6 +144,42 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor() 
 
 # ---------- DB 스키마 ----------
+# 제재 로그 테이블 (초기 스키마 부분에 한 번만)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS mod_logs(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    action TEXT,        -- 'warn', 'ban', 'kick', 'timeout', 'mute' 등
+    moderator_id INTEGER,
+    reason TEXT,
+    created_at TEXT     -- ISO 또는 datetime('now')
+)
+""")
+conn.commit()
+
+# 유저별 경고 횟수
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS warnings (
+    guild_id INTEGER,
+    user_id INTEGER,
+    warns INTEGER DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+""")
+
+# 경고 횟수별 자동 처벌 규칙
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS punish_rules (
+    guild_id INTEGER,
+    warn_count INTEGER,
+    punish_type TEXT,      -- 'ban', 'timeout', 'mute', 'kick'
+    duration INTEGER,      -- 초 (timeout/mute일 때만 사용, 나머지는 NULL 가능)
+    PRIMARY KEY (guild_id, warn_count)
+)
+""")
+conn.commit()
+
 cursor.execute(
     """CREATE TABLE IF NOT EXISTS rank_log_history(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -576,6 +612,30 @@ async def roblox_get_user_groups(user_id: int) -> list[int]:
             add_error_log(f"roblox_get_user_groups: {repr(e)}")
             print(f"DEBUG: Exception in roblox_get_user_groups: {e}")
             return [] 
+        
+async def apply_punishment(
+    guild: discord.Guild,
+    member: discord.Member,
+    punish_type: str,
+    duration: int | None,
+    executor: discord.Member | discord.User,
+    reason: str | None,
+):
+    reason_text = reason or f"자동 처벌 (by {executor})"
+
+    if punish_type == "ban":
+        await guild.ban(member, reason=reason_text)
+    elif punish_type == "kick":
+        await guild.kick(member, reason=reason_text)
+    elif punish_type == "timeout":
+        if duration and duration > 0:
+            await member.timeout(timedelta(seconds=duration), reason=reason_text)
+    elif punish_type == "mute":
+        # 미리 뮤트 역할을 정해놓고 여기서 add_roles
+        mute_role_id = ...  # 설정값에서 가져오기
+        mute_role = guild.get_role(mute_role_id)
+        if mute_role:
+            await member.add_roles(mute_role, reason=reason_text)
 
 async def roblox_get_description_by_user_id(user_id: int) -> Optional[str]:
     url = ROBLOX_USER_API.format(userId=user_id)
@@ -2218,6 +2278,191 @@ async def sync_commands(interaction: discord.Interaction):
         await interaction.followup.send(msg, ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"동기화 중 오류: {e}", ephemeral=True) 
+# 경고
+@bot.tree.command(name="처벌추가", description="경고 횟수에 따른 처벌 규칙을 추가합니다. (관리자)")
+@app_commands.describe(
+    경고횟수="이 횟수에 도달하면 처벌 적용",
+    처벌="적용할 처벌 종류",
+    기간="타임아웃/뮤트일 때 지속 시간 (초 단위)"
+)
+@app_commands.choices(
+    처벌=[
+        app_commands.Choice(name="밴", value="ban"),
+        app_commands.Choice(name="타임아웃", value="timeout"),
+        app_commands.Choice(name="뮤트", value="mute"),
+        app_commands.Choice(name="킥", value="kick"),
+    ]
+)
+async def add_punish_rule(
+    interaction: discord.Interaction,
+    경고횟수: int,
+    처벌: app_commands.Choice[str],
+    기간: int | None = None,
+):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.followup.send("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    punish_type = 처벌.value  # 'ban' / 'timeout' / 'mute' / 'kick'
+
+    if punish_type in ("timeout", "mute") and (기간 is None or 기간 <= 0):
+        await interaction.followup.send(
+            "타임아웃/뮤트 처벌은 기간(초)을 1 이상으로 입력해야 합니다.",
+            ephemeral=True,
+        )
+        return
+
+    # DB에 저장 (있으면 덮어쓰기)
+    cursor.execute(
+        """
+        INSERT INTO punish_rules(guild_id, warn_count, punish_type, duration)
+        VALUES(?, ?, ?, ?)
+        ON CONFLICT(guild_id, warn_count) DO UPDATE SET
+            punish_type=excluded.punish_type,
+            duration=excluded.duration
+        """,
+        (guild.id, 경고횟수, punish_type, 기간),
+    )
+    conn.commit()
+
+    desc = f"경고 `{경고횟수}` 회 도달 시 `{punish_type}` 처벌을 적용합니다."
+    if punish_type in ("timeout", "mute"):
+        desc += f"\n기간: `{기간}` 초"
+
+    embed = discord.Embed(
+        title="✅ 처벌 규칙 추가/수정",
+        color=discord.Color.green(),
+        description=desc,
+    )
+    embed.add_field(
+        name="설정자",
+        value=f"{interaction.user.mention} (`{interaction.user.id}`)",
+        inline=False,
+    )
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+    await send_admin_log(
+        guild,
+        title="✅ 처벌 규칙 추가/수정",
+        description="경고 횟수에 따른 자동 처벌 규칙이 설정되었습니다.",
+        color=discord.Color.green(),
+        fields=[
+            ("경고 횟수", f"`{경고횟수}` 회", True),
+            ("처벌", f"`{punish_type}`", True),
+            (
+                "기간",
+                f"`{기간}` 초" if punish_type in ("timeout", "mute") else "해당 없음",
+                True,
+            ),
+            ("설정자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
+        ],
+    )
+
+@bot.tree.command(name="경고", description="유저에게 경고를 1회 부여합니다. (관리자)")
+@app_commands.describe(
+    user="경고를 줄 유저",
+    이유="경고 사유"
+)
+async def warn(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    이유: str | None = None,
+):
+    # 관리자 체크
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.followup.send("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    # 자기 자신 경고 방지 (원하면 제거해도 됨)
+    if user.id == interaction.user.id:
+        await interaction.followup.send("자기 자신에게는 경고를 줄 수 없습니다.", ephemeral=True)
+        return
+
+    # 1) 현재 경고 횟수 조회
+    cursor.execute(
+        "SELECT warns FROM warnings WHERE guild_id=? AND user_id=?",
+        (guild.id, user.id),
+    )
+    row = cursor.fetchone()
+    current_warns = row[0] if row else 0
+
+    # 2) +1 해서 저장
+    new_warns = current_warns + 1
+    cursor.execute(
+        """
+        INSERT INTO warnings(guild_id, user_id, warns)
+        VALUES(?, ?, ?)
+        ON CONFLICT(guild_id, user_id) DO UPDATE SET warns=excluded.warns
+        """,
+        (guild.id, user.id, new_warns),
+    )
+    conn.commit()
+
+    # 3) mod_logs에 기록 (재부팅 후에도 남는 제재 내역)
+    cursor.execute(
+        """
+        INSERT INTO mod_logs(guild_id, user_id, action, moderator_id, reason, created_at)
+        VALUES(?, ?, ?, ?, ?, datetime('now'))
+        """,
+        (guild.id, user.id, "warn", interaction.user.id, 이유 or None),
+    )
+    conn.commit()
+
+    # 4) 유저에게 피드백 임베드
+    user_embed = discord.Embed(
+        title="⚠️ 경고 부여",
+        color=discord.Color.orange(),
+        description=f"{user.mention} 님에게 경고 1회가 부여되었습니다.",
+    )
+    user_embed.add_field(name="현재 경고 횟수", value=f"`{new_warns}` 회", inline=True)
+    user_embed.add_field(name="사유", value=이유 or "사유 없음", inline=False)
+    user_embed.add_field(
+        name="실행자",
+        value=f"{interaction.user.mention} (`{interaction.user.id}`)",
+        inline=False,
+    )
+
+    await interaction.followup.send(embed=user_embed, ephemeral=True)
+
+    # 5) 관리자 로그 채널에 임베드
+    await send_admin_log(
+        guild,
+        title="⚠️ 경고 부여",
+        description="관리자가 유저에게 경고를 부여했습니다.",
+        color=discord.Color.orange(),
+        fields=[
+            ("대상 유저", f"{user.mention} (`{user.id}`)", False),
+            ("현재 경고 횟수", f"`{new_warns}` 회", True),
+            ("사유", 이유 or "사유 없음", False),
+            ("실행자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
+        ],
+    )
+
+    # 6) (선택) 경고 횟수에 따른 자동 처벌 규칙 적용
+    #    punish_rules 테이블을 사용한다면 여기에서 SELECT 후 apply_punishment 호출
+    # cursor.execute(
+    #     "SELECT punish_type, duration FROM punish_rules WHERE guild_id=? AND warn_count=?",
+    #     (guild.id, new_warns),
+    # )
+    # rule = cursor.fetchone()
+    # if rule:
+    #     punish_type, duration = rule
+    #     await apply_punishment(guild, user, punish_type, duration, interaction.user, 이유)
 
 # @bot.tree.command(
 #     name="일괄닉네임변경",
@@ -2992,27 +3237,75 @@ async def delete_item(interaction: discord.Interaction, 이름: str):
 # =========================
 # 유저 정보
 # =========================
-
 @bot.tree.command(name="유저", description="유저 정보 확인")
-async def userinfo(interaction: discord.Interaction, member: discord.Member=None):
+async def userinfo(interaction: discord.Interaction, member: discord.Member | None = None):
 
     if member is None:
         member = interaction.user
 
-    user = get_user(member.id)
+    guild = interaction.guild
 
+    # 경제 정보
+    user = get_user(member.id)
+    money = user[1]
     exp = user[3]
     level = user[4]
     need = 50 + (level * 25)
 
+    # 🔹 경고 횟수 조회 (warnings 테이블 기준)
+    cursor.execute(
+        "SELECT warns FROM warnings WHERE guild_id=? AND user_id=?",
+        (guild.id, member.id),
+    )
+    row = cursor.fetchone()
+    warn_count = row[0] if row else 0
+
+    # 🔹 최근 제재 내역 5개 조회 (mod_logs 테이블 기준)
+    cursor.execute(
+        """
+        SELECT action, moderator_id, reason, created_at
+        FROM mod_logs
+        WHERE guild_id=? AND user_id=?
+        ORDER BY created_at DESC
+        LIMIT 5
+        """,
+        (guild.id, member.id),
+    )
+    logs = cursor.fetchall()
+
+    # 기본 embed
     embed = discord.Embed(title=f"{member.name} 정보")
+    embed.set_thumbnail(url=member.display_avatar.url)
 
-    embed.add_field(name="💰 돈", value=user[1])
-    embed.add_field(name="⭐ 레벨", value=level)
-    embed.add_field(name="📊 EXP", value=f"{exp}/{need}")
+    embed.add_field(name="💰 돈", value=money, inline=True)
+    embed.add_field(name="⭐ 레벨", value=level, inline=True)
+    embed.add_field(name="📊 EXP", value=f"{exp}/{need}", inline=True)
 
-    await interaction.response.send_message(embed=embed)
+    # 경고 횟수 필드
+    embed.add_field(name="⚠️ 경고 횟수", value=f"{warn_count}회", inline=True)
 
+    # 제재 내역 문자열
+    if logs:
+        lines = []
+        for action, moderator_id, reason, created_at in logs:
+            mod = guild.get_member(moderator_id)
+            mod_name = mod.mention if mod else f"`{moderator_id}`"
+            lines.append(
+                f"[{created_at}] `{action}`\n"
+                f"- 처리자: {mod_name}\n"
+                f"- 사유: {reason or '사유 없음'}"
+            )
+        history_text = "\n\n".join(lines)
+    else:
+        history_text = "최근 제재 내역 없음"
+
+    embed.add_field(
+        name="📜 최근 제재 내역 (최대 5개)",
+        value=history_text[:1024],
+        inline=False,
+    )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================
 # 랭킹
@@ -3482,6 +3775,7 @@ async def on_ready():
 
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 
 

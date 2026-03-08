@@ -3687,15 +3687,38 @@ STATUS_EMOJIS = {
     "서비스 준비중": "🟡",
     "중지": "🔴"
 }
+
 SUPPORT_SERVER = "https://discord.gg/e3Mb5mdSAe"
 bot_start_time = time.time()
 status_channel_id = 1480268362889166989  # 15초 갱신용 채널
+status_msg = None  # 마지막 상태 메시지 저장용
 
 # ------------------------
-# 관리자 확인
+# 상태 embed 생성 함수
 # ------------------------
-def is_admin(user):
-    return user.guild_permissions.administrator
+def generate_status_embed(title="🤖 봇 상태"):
+    uptime = int(time.time() - bot_start_time)
+    hours = uptime // 3600
+    minutes = (uptime % 3600) // 60
+    seconds = uptime % 60
+    status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
+    cpu_usage = psutil.cpu_percent(interval=None)
+    memory_usage = psutil.virtual_memory().percent
+    total_users = sum(g.member_count for g in bot.guilds)
+    command_count = len(bot.commands)
+    ping = round(bot.latency * 1000)
+
+    embed = discord.Embed(title=title, color=discord.Color.green())
+    embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
+    embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
+    embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
+    embed.add_field(name="👥 총 유저 수", value=f"{total_users}", inline=True)
+    embed.add_field(name="📦 명령어 수", value=f"{command_count}", inline=True)
+    embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
+    embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
+    embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
+    embed.add_field(name="🔗 서포트 서버", value=SUPPORT_SERVER, inline=False)
+    return embed
 
 # ------------------------
 # 슬래시 명령어: 봇 상태 지정
@@ -3729,30 +3752,9 @@ async def set_bot_status(interaction: Interaction, status: app_commands.Choice[s
     description="봇 정보를 확인합니다"
 )
 async def bot_info(interaction: Interaction):
-    uptime = int(time.time() - bot_start_time)
-    hours = uptime // 3600
-    minutes = (uptime % 3600) // 60
-    seconds = uptime % 60
-    status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
-
-    cpu_usage = psutil.cpu_percent(interval=1)
-    memory_usage = psutil.virtual_memory().percent
-    total_users = sum(guild.member_count for guild in bot.guilds)
-    command_count = len(bot.commands)
-    ping = round(bot.latency * 1000)
-
-    embed = discord.Embed(title="🤖 봇 정보", color=discord.Color.blue())
-    embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
-    embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
-    embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
-    embed.add_field(name="👥 총 유저 수", value=f"{total_users}", inline=True)
-    embed.add_field(name="📦 명령어 수", value=f"{command_count}", inline=True)
-    embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
-    embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
-    embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
-    embed.add_field(name="🔗 서포트 서버", value=SUPPORT_SERVER, inline=False)
+    embed = generate_status_embed(title="🤖 봇 정보")
+    embed.color = discord.Color.blue()
     embed.set_footer(text=f"요청자: {interaction.user}")
-
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ------------------------
@@ -3776,36 +3778,27 @@ async def set_status_channel(interaction: Interaction, channel: discord.TextChan
 # ------------------------
 @tasks.loop(seconds=15)
 async def update_status():
+    global status_msg
     if not status_channel_id:
         return
     channel = bot.get_channel(status_channel_id)
     if not channel:
         return
 
-    uptime = int(time.time() - bot_start_time)
-    hours = uptime // 3600
-    minutes = (uptime % 3600) // 60
-    seconds = uptime % 60
-    status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
+    embed = generate_status_embed(title="🤖 봇 상태 (자동 갱신)")
 
-    cpu_usage = psutil.cpu_percent(interval=1)
-    memory_usage = psutil.virtual_memory().percent
-    total_users = sum(g.member_count for g in bot.guilds)
-    command_count = len(bot.commands)
-    ping = round(bot.latency * 1000)
-
-    embed = discord.Embed(title="🤖 봇 상태 (자동 갱신)", color=discord.Color.green())
-    embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
-    embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
-    embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
-    embed.add_field(name="👥 총 유저 수", value=f"{total_users}", inline=True)
-    embed.add_field(name="📦 명령어 수", value=f"{command_count}", inline=True)
-    embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
-    embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
-    embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
-    embed.add_field(name="🔗 서포트 서버", value=SUPPORT_SERVER, inline=False)
-
-    await channel.send(embed=embed)
+    # 메시지 수정 또는 새로 전송
+    try:
+        if status_msg:
+            await status_msg.edit(embed=embed)
+        else:
+            status_msg = await channel.send(embed=embed)
+    except discord.Forbidden:
+        # 권한 없으면 무시
+        pass
+    except discord.HTTPException:
+        # 메시지 삭제 등 예외 발생 시 새 메시지 생성
+        status_msg = await channel.send(embed=embed)
     
 # -- Fast API --
 @app.get("/api/bot-stats")

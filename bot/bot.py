@@ -28,8 +28,6 @@ from discord import ButtonStyle
 from fastapi import FastAPI
 import discord
 from discord.ext import commands
-from threading import Thread
-import uvicorn
 
 # FastAPI 앱 생성
 app = FastAPI()

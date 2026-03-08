@@ -25,6 +25,55 @@ import time
 from discord.ui import View, button
 from discord import ButtonStyle
 
+from fastapi import FastAPI
+import discord
+from discord.ext import commands
+from threading import Thread
+import uvicorn
+
+# FastAPI 앱 생성
+app = FastAPI()
+
+# 이 코드를 bot 정의 아래에 넣기
+# bot = commands.Bot(...) 다음에
+
+@app.get("/api/bot-stats")
+async def bot_stats():
+    """Bot 통계 반환"""
+    if not bot.is_ready():
+        return {
+            "guilds": 0,
+            "verified_users": 0,
+            "warn_records": 0,
+        }
+    
+    # Guild 개수
+    guilds_count = len(bot.guilds)
+    
+    # 모든 멤버 수 (중복 제거)
+    all_members = set()
+    for guild in bot.guilds:
+        for member in guild.members:
+            all_members.add(member.id)
+    
+    # DB에서 경고 기록 수 가져오기 (선택사항)
+    warn_count = 0
+    try:
+        cursor.execute("SELECT COUNT(*) FROM logs WHERE type = 'warn'")
+        warn_count = cursor.fetchone()[0]
+    except:
+        warn_count = 0
+    
+    return {
+        "guilds": guilds_count,
+        "verified_users": len(all_members),
+        "warn_records": warn_count,
+    }
+
+# FastAPI를 별도 스레드에서 실행
+def run_fastapi():
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="critical")
+
 # =========================
 # 데이터베이스
 # =========================
@@ -3982,6 +4031,13 @@ async def on_ready():
 
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
+
+    # FastAPI 시작 (한 번만)
+    if not hasattr(bot, '_fastapi_started'):
+        thread = Thread(target=run_fastapi, daemon=True)
+        thread.start()
+        bot._fastapi_started = True
+        print(f"FastAPI running on port 8001")
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 

@@ -17,7 +17,45 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import requests
 from datetime import datetime
-from enum import Enum 
+from enum import Enum
+import sqlite3
+import random
+import time
+
+# =========================
+# 데이터베이스
+# =========================
+
+conn = sqlite3.connect("economy.db")
+cur = conn.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS economy(
+    user_id INTEGER PRIMARY KEY,
+    money INTEGER DEFAULT 0,
+    last_daily INTEGER DEFAULT 0,
+    exp INTEGER DEFAULT 0,
+    level INTEGER DEFAULT 1
+)
+""")
+
+conn.commit()
+
+
+def get_user(user_id):
+
+    cur.execute("SELECT * FROM economy WHERE user_id=?", (user_id,))
+    data = cur.fetchone()
+
+    if data is None:
+        cur.execute(
+            "INSERT INTO economy (user_id,money,last_daily,exp,level) VALUES (?,0,0,0,1)",
+            (user_id,)
+        )
+        conn.commit()
+        return (user_id,0,0,0,1)
+
+    return data
 
 VERIFY_ROLE_ID = 1461636782176075831      # 🟢 인증자 역할 ID
 UNVERIFY_ROLE_ID = 1478713261074550956     # 🔴 제거할 역할 ID (예: 미인증자)
@@ -2250,52 +2288,6 @@ async def view_blacklist(interaction: discord.Interaction):
 #     )
 
 # -- 경제 명령어 --
-import sqlite3
-import random
-import time
-
-# =========================
-# 봇 기본 설정
-# =========================
-
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# =========================
-# 데이터베이스
-# =========================
-
-conn = sqlite3.connect("economy.db")
-cur = conn.cursor()
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS economy(
-    user_id INTEGER PRIMARY KEY,
-    money INTEGER DEFAULT 0,
-    last_daily INTEGER DEFAULT 0,
-    exp INTEGER DEFAULT 0,
-    level INTEGER DEFAULT 1
-)
-""")
-
-conn.commit()
-
-
-def get_user(user_id):
-
-    cur.execute("SELECT * FROM economy WHERE user_id=?", (user_id,))
-    data = cur.fetchone()
-
-    if data is None:
-        cur.execute(
-            "INSERT INTO economy (user_id,money,last_daily,exp,level) VALUES (?,0,0,0,1)",
-            (user_id,)
-        )
-        conn.commit()
-        return (user_id,0,0,0,1)
-
-    return data
-
 
 # =========================
 # 아이템샵 (역할 지급)

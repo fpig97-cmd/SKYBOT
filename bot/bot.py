@@ -4197,39 +4197,41 @@ async def force_leave(guild: discord.Guild) -> None:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
 
 @tasks.loop(seconds=5)
+@tasks.loop(seconds=15)
 async def update_status():
-    channel = bot.get_channel(STATUS_CHANNEL_ID)
+    if not status_channel_id:
+        print("상태 채널 미지정")
+        return
+
+    channel = bot.get_channel(status_channel_id)
     if not channel:
+        print("채널을 찾을 수 없음")
         return
 
     uptime = int(time.time() - bot_start_time)
     hours = uptime // 3600
     minutes = (uptime % 3600) // 60
     seconds = uptime % 60
-
     status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
-    cpu_usage = psutil.cpu_percent(interval=1)
+
+    cpu_usage = psutil.cpu_percent(interval=0.5)
     memory_usage = psutil.virtual_memory().percent
     total_users = sum(g.member_count for g in bot.guilds)
-    command_count = len(bot.commands)
     ping = round(bot.latency * 1000)
 
-    embed = discord.Embed(
-        title="🤖 봇 상태 (자동 갱신)",
-        color=discord.Color.green()
-    )
-
+    embed = discord.Embed(title="🤖 봇 상태", color=discord.Color.green())
     embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
     embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
     embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
     embed.add_field(name="👥 총 유저 수", value=f"{total_users}", inline=True)
-    embed.add_field(name="📦 명령어 수", value=f"{command_count}", inline=True)
     embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
     embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
     embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
-    embed.add_field(name="🔗 서포트 서버", value=SUPPORT_SERVER, inline=False)
 
-    await channel.send(embed=embed)
+    try:
+        await channel.send(embed=embed)
+    except Exception as e:
+        print(f"상태 전송 실패: {e}")
     
 @bot.event
 async def on_app_command_completion(

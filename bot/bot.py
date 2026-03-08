@@ -4197,7 +4197,6 @@ async def force_leave(guild: discord.Guild) -> None:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
 
 @tasks.loop(seconds=5)
-@tasks.loop(seconds=15)
 async def update_status():
     if not status_channel_id:
         print("상태 채널 미지정")

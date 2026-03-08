@@ -4014,6 +4014,30 @@ async def on_interaction(interaction: discord.Interaction):
                 return
             
 # ==================== FastAPI 엔드포인트 ====================
+@app.get("/api/errors")
+def get_errors():
+    """최근 에러 로그 반환"""
+    try:
+        recent_errors = error_logs[-20:] if error_logs else []  # 최근 20개
+        
+        formatted = []
+        for err in recent_errors:
+            ts = err.get("timestamp")
+            if ts:
+                time_str = ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, 'strftime') else str(ts)
+            else:
+                time_str = "N/A"
+            
+            formatted.append({
+                "timestamp": time_str,
+                "message": err.get("message", "Unknown error")
+            })
+        
+        return formatted
+    except Exception as e:
+        print(f"[API] Error logs error: {e}")
+        return []
+
 @app.get("/")
 def root():
     return {"status": "SKY ARMY BOT", "ready": bot.is_ready()}

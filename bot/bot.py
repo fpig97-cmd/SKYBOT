@@ -3777,28 +3777,45 @@ async def set_status_channel(interaction: Interaction, channel: discord.TextChan
 # 15초 루프: 상태 자동 갱신
 # ------------------------
 @tasks.loop(seconds=15)
+# ------------------------
+# 15초 루프: 상태 자동 갱신
+# ------------------------
+@tasks.loop(seconds=5)
 async def update_status():
     global status_msg
     if not status_channel_id:
         return
+
     channel = bot.get_channel(status_channel_id)
     if not channel:
         return
 
+    # 상태 embed 생성
     embed = generate_status_embed(title="🤖 봇 상태 (자동 갱신)")
 
-    # 메시지 수정 또는 새로 전송
-    try:
-        if status_msg:
-            await status_msg.edit(embed=embed)
-        else:
+    # 첫 실행: 메시지 없으면 새로 보내기
+    if status_msg is None:
+        try:
             status_msg = await channel.send(embed=embed)
-    except discord.Forbidden:
-        # 권한 없으면 무시
-        pass
+        except discord.Forbidden:
+            # 권한 없으면 무시
+            return
+        except discord.HTTPException:
+            return
+        return  # 첫 메시지 전송 후 루프 종료
+
+    # 이미 메시지가 있으면 수정
+    try:
+        await status_msg.edit(embed=embed)
+    except discord.NotFound:
+        # 메시지가 삭제되었으면 새로 전송
+        try:
+            status_msg = await channel.send(embed=embed)
+        except:
+            pass
     except discord.HTTPException:
-        # 메시지 삭제 등 예외 발생 시 새 메시지 생성
-        status_msg = await channel.send(embed=embed)
+        # 기타 예외 무시
+        pass
     
 # -- Fast API --
 @app.get("/api/bot-stats")

@@ -22,6 +22,9 @@ import sqlite3
 import random
 import time
 
+from discord.ui import View, button
+from discord import ButtonStyle
+
 # =========================
 # 데이터베이스
 # =========================
@@ -267,9 +270,49 @@ CREATE TABLE IF NOT EXISTS shop_items(
 """)
 conn.commit()
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS command_logs(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    user_id INTEGER,
+    user_name TEXT,
+    command_name TEXT,
+    command_full TEXT,
+    created_at TEXT
+)
+""")
+conn.commit()
+
 conn.commit() 
 
 # ---------- 설정/권한 유틸 ---------- 
+
+class CommandLogView(View):
+    def __init__(self, pages: list[str]):
+        super().__init__(timeout=60)
+        self.pages = pages
+        self.index = 0
+
+    async def update(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="📜 명령어 로그",
+            description=self.pages[self.index],
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"페이지 {self.index+1}/{len(self.pages)}")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @button(label="⬅ 이전", style=ButtonStyle.gray)
+    async def prev(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if self.index > 0:
+            self.index -= 1
+        await self.update(interaction)
+
+    @button(label="다음 ➡", style=ButtonStyle.gray)
+    async def next(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if self.index < len(self.pages) - 1:
+            self.index += 1
+        await self.update(interaction)
 
 def get_senior_officer_role_id(guild_id: int) -> Optional[int]:
     cursor.execute("SELECT senior_officer_role_id FROM senior_officer_settings WHERE guild_id=?", (guild_id,))
@@ -1621,6 +1664,66 @@ async def set_admin_roles(
                 "해당 역할은 관리자 목록에 없습니다.",
                 ephemeral=True
     )
+# 로그
+@bot.tree.command(name="명령어로그", description="명령어 사용 기록을 확인합니다. (관리자)")
+@app_commands.describe(페이지크기="한 페이지에 표시할 개수 (기본 10)")
+async def command_logs(
+    interaction: discord.Interaction,
+    페이지크기: int = 10,
+):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    # 최신 순으로 200개 정도까지만
+    cursor.execute(
+        """
+        SELECT id, user_name, user_id, command_name, command_full, created_at
+        FROM command_logs
+        WHERE guild_id=?
+        ORDER BY id DESC
+        LIMIT 200
+        """,
+        (guild.id,),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        await interaction.response.send_message("로그가 없습니다.", ephemeral=True)
+        return
+
+    # 문자열로 가공
+    lines = []
+    for log_id, user_name, user_id, cmd_name, full, created_at in rows:
+        lines.append(
+            f"{log_id}. [{created_at}] /{cmd_name} - {user_name} ({user_id})\n"
+            f"    ⤷ {full}"
+        )
+
+    # 페이지 나누기
+    pages: list[str] = []
+    for i in range(0, len(lines), 페이지크기):
+        chunk = lines[i:i+페이지크기]
+        pages.append("\n".join(chunk))
+
+    view = CommandLogView(pages)
+    first_embed = discord.Embed(
+        title="📜 명령어 로그",
+        description=pages[0],
+        color=discord.Color.blurple(),
+    )
+    first_embed.set_footer(text=f"페이지 1/{len(pages)}")
+
+    await interaction.response.send_message(
+        embed=first_embed,
+        view=view,
+        ephemeral=True,
+    )
+
 # 그룹
 @bot.tree.command(name="명단", description="Roblox 그룹 역할 리스트를 보여줍니다.")
 async def list_roles(interaction: discord.Interaction):
@@ -3243,6 +3346,47 @@ async def force_leave(guild: discord.Guild) -> None:
     except Exception as e:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
         
+@bot.event
+async def on_app_command_completion(
+    interaction: discord.Interaction,
+    command: discord.app_commands.Command,
+):
+    try:
+        if not interaction.guild:
+            return
+
+        guild_id = interaction.guild.id
+        user = interaction.user
+
+        # 전체 명령어 문자열 예시: "/구매 이름: VIP"
+        options = []
+        if interaction.namespace:
+            for k, v in interaction.namespace.__dict__.items():
+                options.append(f"{k}={v}")
+        full_str = f"/{command.qualified_name}"
+        if options:
+            full_str += " " + " ".join(options)
+
+        cursor.execute(
+            """
+            INSERT INTO command_logs(
+                guild_id, user_id, user_name,
+                command_name, command_full, created_at
+            )
+            VALUES(?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                guild_id,
+                user.id,
+                f"{user.name}#{user.discriminator}",
+                command.qualified_name,
+                full_str,
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        add_error_log(f"command_log: {repr(e)}")
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")

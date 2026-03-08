@@ -1417,6 +1417,39 @@ async def bulk_force_verify(interaction: discord.Interaction):
         final_embed.set_footer(text=f"요청자: {interaction.user} ({interaction.user.id})")
         await log_channel.send(embed=final_embed)
 
+@bot.tree.command(name="돈추가", description="유저에게 돈을 추가합니다. (관리자)")
+@app_commands.describe(
+    유저="돈을 받을 유저",
+    금액="추가할 금액"
+)
+async def add_money(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    금액: int
+):
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    if 금액 <= 0:
+        await interaction.response.send_message("금액은 1 이상이어야 합니다.", ephemeral=True)
+        return
+
+    # 유저 생성 (없으면 생성)
+    user = get_user(유저.id)
+
+    # 돈 추가
+    cur.execute(
+        "UPDATE economy SET money = money + ? WHERE user_id=?",
+        (금액, 유저.id)
+    )
+    conn.commit()
+
+    await interaction.response.send_message(
+        f"💰 {유저.mention}에게 `{금액}`원을 추가했습니다."
+    )
+
 @bot.tree.command(name="강제인증해제", description="특정 유저의 강제인증을 해제합니다. (관리자)")
 @app_commands.describe(
     user="강제인증을 해제할 디스코드 유저"

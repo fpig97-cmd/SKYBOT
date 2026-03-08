@@ -2143,6 +2143,7 @@ async def sync_commands(interaction: discord.Interaction):
     관리자="관리자 로그 채널",
     보안="보안 로그 채널",
     개발자="개발자 로그 채널",
+    아이템="아이템 구매 로그 채널",  # 🔹 추가
 )
 async def set_log_channels(
     interaction: discord.Interaction,
@@ -2151,44 +2152,49 @@ async def set_log_channels(
     관리자: discord.TextChannel | None = None,
     보안: discord.TextChannel | None = None,
     개발자: discord.TextChannel | None = None,
+    아이템: discord.TextChannel | None = None,  # 🔹 추가
 ):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
-        return 
+        return
 
     guild = interaction.guild
     if guild is None:
         await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
-        return 
+        return
 
-    changed: list[str] = [] 
+    changed: list[str] = []
 
     if 인증 is not None:
         set_log_channel(guild.id, "verify", 인증.id)
-        changed.append(f"인증: {인증.mention}") 
+        changed.append(f"인증: {인증.mention}")
 
     if 그룹변경 is not None:
         set_log_channel(guild.id, "group_change", 그룹변경.id)
-        changed.append(f"그룹변경: {그룹변경.mention}") 
+        changed.append(f"그룹변경: {그룹변경.mention}")
 
     if 관리자 is not None:
         set_log_channel(guild.id, "admin", 관리자.id)
-        changed.append(f"관리자: {관리자.mention}") 
+        changed.append(f"관리자: {관리자.mention}")
 
     if 보안 is not None:
         set_log_channel(guild.id, "security", 보안.id)
-        changed.append(f"보안: {보안.mention}") 
+        changed.append(f"보안: {보안.mention}")
 
     if 개발자 is not None:
         set_log_channel(guild.id, "dev", 개발자.id)
-        changed.append(f"개발자: {개발자.mention}") 
+        changed.append(f"개발자: {개발자.mention}")
+
+    if 아이템 is not None:  # 🔹 추가
+        set_log_channel(guild.id, "item", 아이템.id)
+        changed.append(f"아이템: {아이템.mention}")
 
     if not changed:
         await interaction.response.send_message(
             "변경된 채널이 없습니다. 최소 한 개 이상 지정해 주세요.",
             ephemeral=True,
         )
-        return 
+        return
 
     msg = "다음 로그 채널이 설정되었습니다:\n" + "\n".join(changed)
     await interaction.response.send_message(msg, ephemeral=True)
@@ -2494,8 +2500,7 @@ async def shop(interaction: discord.Interaction):
 # =========================
 # 구매
 # =========================
-
-@bot.tree.command(name="구매", description="아이템을 구매합니다.")
+@bot.tree.command(name="구매", description="상점 아이템을 구매합니다.")
 @app_commands.describe(이름="구매할 아이템 이름")
 async def buy(interaction: discord.Interaction, 이름: str):
     await interaction.response.defer(ephemeral=True)
@@ -2506,7 +2511,7 @@ async def buy(interaction: discord.Interaction, 이름: str):
         await interaction.followup.send("길드에서만 사용 가능합니다.", ephemeral=True)
         return
 
-    # 1) 아이템 조회
+    # 아이템 조회
     cursor.execute(
         """
         SELECT price, type, role_id, level, exp
@@ -2522,7 +2527,7 @@ async def buy(interaction: discord.Interaction, 이름: str):
 
     price, item_type, role_id, level_val, exp_val = row
 
-    # 2) 유저 경제 정보
+    # 유저 경제 정보
     user = get_user(member.id)  # (user_id, money, last_daily, exp, level)
     _, money, _, cur_exp, cur_level = user
 
@@ -2530,7 +2535,7 @@ async def buy(interaction: discord.Interaction, 이름: str):
         await interaction.followup.send("잔액이 부족합니다.", ephemeral=True)
         return
 
-    # 3) 돈 차감
+    # 돈 차감
     new_money = money - price
     cur.execute(
         "UPDATE economy SET money=? WHERE user_id=?",
@@ -2539,16 +2544,13 @@ async def buy(interaction: discord.Interaction, 이름: str):
 
     detail = ""
 
-    # 4) 타입별 지급
+    # 타입별 지급
     if item_type == "role":
         if role_id:
             role = guild.get_role(role_id)
             if role:
-                try:
-                    await guild.get_member(member.id).add_roles(role, reason="아이템 구매")
-                    detail = f"역할 {role.mention} 지급 완료."
-                except Exception as e:
-                    detail = f"역할 지급 중 오류: {e}"
+                await guild.get_member(member.id).add_roles(role, reason="아이템 구매")
+                detail = f"역할 {role.mention} 지급 완료."
             else:
                 detail = "역할을 찾을 수 없습니다."
         else:
@@ -2584,7 +2586,8 @@ async def buy(interaction: discord.Interaction, 이름: str):
 
     conn.commit()
 
-    embed = discord.Embed(
+    # 유저에게 응답
+    user_embed = discord.Embed(
         title="✅ 아이템 구매 완료",
         color=discord.Color.green(),
         description=(
@@ -2594,8 +2597,49 @@ async def buy(interaction: discord.Interaction, 이름: str):
             f"{detail}"
         ),
     )
-    await interaction.followup.send(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=user_embed, ephemeral=True)
 
+    # 아이템 로그 채널에 파란색 embed
+    log_ch_id = get_log_channel(guild.id, "item")
+    if log_ch_id:
+        log_ch = guild.get_channel(log_ch_id) or await guild.fetch_channel(log_ch_id)
+        if log_ch:
+            log_embed = discord.Embed(
+                title="🔵 아이템 구매",
+                color=discord.Color.blue(),  # 파란색
+            )
+            log_embed.add_field(
+                name="구매자",
+                value=f"{member.mention} (`{member.id}`)",
+                inline=False,
+            )
+            log_embed.add_field(name="아이템 이름", value=f"`{이름}`", inline=True)
+            log_embed.add_field(name="가격", value=f"`{price}`", inline=True)
+            log_embed.add_field(name="타입", value=f"`{item_type}`", inline=True)
+            log_embed.add_field(name="구매 후 잔액", value=f"`{new_money}`", inline=False)
+
+            if item_type == "role" and role_id:
+                role = guild.get_role(role_id)
+                if role:
+                    log_embed.add_field(
+                        name="지급된 역할",
+                        value=f"{role.mention} (`{role.id}`)",
+                        inline=False,
+                    )
+            if item_type == "level" and level_val is not None:
+                log_embed.add_field(
+                    name="레벨 증가",
+                    value=f"+{int(level_val)} (이전: {cur_level})",
+                    inline=False,
+                )
+            if item_type == "exp" and exp_val is not None:
+                log_embed.add_field(
+                    name="경험치 증가",
+                    value=f"+{int(exp_val)} (이전: {cur_exp})",
+                    inline=False,
+                )
+
+            await log_ch.send(embed=log_embed)
 
 # =========================
 # 아이템 추가
@@ -2622,18 +2666,21 @@ async def add_item(
     이름: str,
     가격: int,
     종류: app_commands.Choice[str],
-    역할: Optional[discord.Role] = None,
-    레벨: Optional[int] = None,
-    경험치: Optional[int] = None,
+    역할: discord.Role | None = None,
+    레벨: int | None = None,
+    경험치: int | None = None,
 ):
-    # 관리자 체크
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
 
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
     item_type = 종류.value  # 'role' / 'level' / 'exp'
 
-    # 타입별 필수값 검증
     if item_type == "role":
         if 역할 is None:
             await interaction.response.send_message("역할 아이템은 역할 옵션이 필수입니다.", ephemeral=True)
@@ -2664,37 +2711,45 @@ async def add_item(
         INSERT INTO shop_items(guild_id, name, price, type, role_id, level, exp)
         VALUES(?, ?, ?, ?, ?, ?, ?)
         """,
-        (
-            interaction.guild.id,
-            이름,
-            가격,
-            item_type,
-            role_id,
-            level_val,
-            exp_val,
-        ),
+        (guild.id, 이름, 가격, item_type, role_id, level_val, exp_val),
     )
     conn.commit()
 
-    desc = f"이름: `{이름}`\n가격: `{가격}`\n종류: `{item_type}`"
-    if role_id:
-        desc += f"\n역할: {역할.mention} (`{역할.id}`)"
-    if level_val is not None:
-        desc += f"\n레벨: `{level_val}`"
-    if exp_val is not None:
-        desc += f"\n경험치: `{exp_val}`"
+    # 유저에게 응답
+    await interaction.response.send_message(f"✅ `{이름}` 아이템을 추가했습니다.", ephemeral=True)
 
-    embed = discord.Embed(
-        title="아이템 추가 완료",
-        description=desc,
-        color=discord.Color.green(),
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    # 아이템 로그 채널에 초록색 embed
+    log_ch_id = get_log_channel(guild.id, "item")
+    if log_ch_id:
+        log_ch = guild.get_channel(log_ch_id) or await guild.fetch_channel(log_ch_id)
+        if log_ch:
+            embed = discord.Embed(
+                title="🟢 아이템 추가",
+                color=discord.Color.green(),  # 초록색
+            )
+            embed.add_field(name="아이템 이름", value=f"`{이름}`", inline=True)
+            embed.add_field(name="가격", value=f"`{가격}`", inline=True)
+            embed.add_field(name="타입", value=f"`{item_type}`", inline=True)
+
+            if item_type == "role" and role_id:
+                role = guild.get_role(role_id)
+                if role:
+                    embed.add_field(name="역할", value=f"{role.mention} (`{role.id}`)", inline=False)
+            if item_type == "level" and level_val is not None:
+                embed.add_field(name="레벨", value=f"+{level_val}", inline=False)
+            if item_type == "exp" and exp_val is not None:
+                embed.add_field(name="경험치", value=f"+{exp_val}", inline=False)
+
+            embed.add_field(
+                name="추가한 유저",
+                value=f"{interaction.user.mention} (`{interaction.user.id}`)",
+                inline=False,
+            )
+            await log_ch.send(embed=embed)
 
 # =========================
 # 아이템 제거
 # =========================
-
 @bot.tree.command(name="아이템삭제", description="상점에서 아이템을 삭제합니다. (관리자)")
 @app_commands.describe(이름="삭제할 아이템 이름")
 async def delete_item(interaction: discord.Interaction, 이름: str):
@@ -2702,27 +2757,64 @@ async def delete_item(interaction: discord.Interaction, 이름: str):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
         return
 
-    # 존재 여부 확인
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    # 삭제 전 정보 조회 (로그용)
     cursor.execute(
-        "SELECT id FROM shop_items WHERE guild_id=? AND name=?",
-        (interaction.guild.id, 이름),
+        """
+        SELECT price, type, role_id, level, exp
+        FROM shop_items
+        WHERE guild_id=? AND name=?
+        """,
+        (guild.id, 이름),
     )
     row = cursor.fetchone()
     if not row:
         await interaction.response.send_message("해당 이름의 아이템이 없습니다.", ephemeral=True)
         return
 
+    price, item_type, role_id, level_val, exp_val = row
+
     # 삭제
     cursor.execute(
         "DELETE FROM shop_items WHERE guild_id=? AND name=?",
-        (interaction.guild.id, 이름),
+        (guild.id, 이름),
     )
     conn.commit()
 
-    await interaction.response.send_message(
-        f"`{이름}` 아이템을 삭제했습니다.",
-        ephemeral=True,
-    )
+    await interaction.response.send_message(f"🗑 `{이름}` 아이템을 삭제했습니다.", ephemeral=True)
+
+    # 아이템 로그 채널에 빨간색 embed
+    log_ch_id = get_log_channel(guild.id, "item")
+    if log_ch_id:
+        log_ch = guild.get_channel(log_ch_id) or await guild.fetch_channel(log_ch_id)
+        if log_ch:
+            embed = discord.Embed(
+                title="🔴 아이템 삭제",
+                color=discord.Color.red(),  # 빨간색
+            )
+            embed.add_field(name="아이템 이름", value=f"`{이름}`", inline=True)
+            embed.add_field(name="가격", value=f"`{price}`", inline=True)
+            embed.add_field(name="타입", value=f"`{item_type}`", inline=True)
+
+            if item_type == "role" and role_id:
+                role = guild.get_role(role_id)
+                if role:
+                    embed.add_field(name="역할", value=f"{role.mention} (`{role.id}`)", inline=False)
+            if item_type == "level" and level_val is not None:
+                embed.add_field(name="레벨", value=f"+{level_val}", inline=False)
+            if item_type == "exp" and exp_val is not None:
+                embed.add_field(name="경험치", value=f"+{exp_val}", inline=False)
+
+            embed.add_field(
+                name="삭제한 유저",
+                value=f"{interaction.user.mention} (`{interaction.user.id}`)",
+                inline=False,
+            )
+            await log_ch.send(embed=embed)
 
 # =========================
 # 유저 정보

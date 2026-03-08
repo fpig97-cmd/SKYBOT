@@ -3684,9 +3684,9 @@ STATUS_EMOJIS = {
     "서비스 준비중": "🟡",
     "중지": "🔴"
 }
-SUPPORT_SERVER = "https://discord.gg/서포트서버링크"
+SUPPORT_SERVER = "https://discord.gg/e3Mb5mdSAe"
 bot_start_time = time.time()
-status_channel_id = None  # 15초 갱신용 채널
+status_channel_id = 1480268362889166989  # 15초 갱신용 채널
 
 # ------------------------
 # 관리자 확인

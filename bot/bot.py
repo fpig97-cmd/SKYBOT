@@ -1633,7 +1633,7 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
                 ("실행자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
             ],
         )
-        
+
 @bot.tree.command(name="공지", description="인증된 모든 유저에게 공지 전송")
 @app_commands.describe(
     message="공지 내용",
@@ -4093,6 +4093,38 @@ async def on_interaction(interaction: discord.Interaction):
                 return
             
 # ==================== FastAPI 엔드포인트 ====================
+@app.get("/api/bot-stats")
+def bot_stats():
+    """Bot 통계 반환"""
+    try:
+        guilds_count = len(bot.guilds)
+        
+        # 경고 기록 수 계산
+        cursor.execute("SELECT COUNT(*) FROM warnings")
+        warn_count = cursor.fetchone()[0]
+        
+        # 인증된 유저 수
+        cursor.execute("SELECT COUNT(DISTINCT discordid) FROM users WHERE verified=1")
+        verified_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(DISTINCT discordid) FROM forcedverified")
+        forced_count = cursor.fetchone()[0]
+        
+        total_users = verified_count + forced_count
+        
+        print(f"[API] Stats: {guilds_count} guilds, {total_users} users, {warn_count} warns")
+        
+        return {
+            "guilds": guilds_count,
+            "verified_users": total_users,
+            "warn_records": warn_count,
+        }
+    except Exception as e:
+        print(f"[API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"guilds": 0, "verified_users": 0, "warn_records": 0}
+
 @app.get("/api/errors")
 def get_errors():
     """최근 에러 로그 반환"""

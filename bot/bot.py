@@ -3772,11 +3772,6 @@ async def set_status_channel(interaction: Interaction, channel: discord.TextChan
         return
     status_channel_id = channel.id
     await interaction.response.send_message(f"{channel.mention} 채널로 상태 갱신이 설정되었습니다.", ephemeral=True)
-
-# ------------------------
-# 15초 루프: 상태 자동 갱신
-# ------------------------
-@tasks.loop(seconds=15)
 # ------------------------
 # 15초 루프: 상태 자동 갱신
 # ------------------------

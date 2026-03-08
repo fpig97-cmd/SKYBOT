@@ -63,11 +63,11 @@ async def bot_stats():
             "warn_records": 0,
         }
 
-# FastAPI를 별도 스레드에서 실행
 def run_fastapi():
     """FastAPI 서버를 별도 스레드에서 실행"""
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="error")
-
+    # Railway는 PORT 환경변수 사용
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="critical")
 
 # =========================
 # 데이터베이스
@@ -4049,4 +4049,3 @@ async def on_interaction(interaction: discord.Interaction):
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-

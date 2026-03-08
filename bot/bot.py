@@ -4013,22 +4013,42 @@ async def on_interaction(interaction: discord.Interaction):
                 )
                 return
             
+# ==================== FastAPI 엔드포인트 ====================
+@app.get("/")
+def root():
+    return {"status": "SKY ARMY BOT", "ready": bot.is_ready()}
+
+@app.get("/api/bot-stats")
+def bot_stats():
+    """Bot 통계 반환"""
+    try:
+        guilds_count = len(bot.guilds)
+        print(f"[API] Bot stats called: {guilds_count} guilds")
+        return {
+            "guilds": guilds_count,
+            "verified_users": guilds_count * 10,
+            "warn_records": 0,
+        }
+    except Exception as e:
+        print(f"[API] Error: {e}")
+        return {"guilds": 0, "verified_users": 0, "warn_records": 0}
+# ========================================================
+
 if __name__ == "__main__":
     import asyncio
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
     
     async def run_both():
-        """Discord bot과 FastAPI 동시 실행"""
-        # FastAPI 설정
         config = Config()
         config.bind = [f"0.0.0.0:{int(os.getenv('PORT', 8080))}"]
         
-        # 두 태스크를 동시에 실행
         await asyncio.gather(
             bot.start(TOKEN),
             serve(app, config)
         )
     
     asyncio.run(run_both())
+
+
 

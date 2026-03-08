@@ -65,10 +65,8 @@ async def bot_stats():
 
 def run_fastapi():
     """FastAPI 서버를 별도 스레드에서 실행"""
-    # Railway는 PORT 환경변수 사용
     port = int(os.getenv("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="critical")
-
 # =========================
 # 데이터베이스
 # =========================
@@ -4027,12 +4025,12 @@ async def on_ready():
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
 
-    # FastAPI 시작 (한 번만)
     if not hasattr(bot, '_fastapi_started'):
         thread = Thread(target=run_fastapi, daemon=True)
         thread.start()
         bot._fastapi_started = True
-        print(f"FastAPI running on port 8001")
+        port = int(os.getenv("PORT", 8080))
+        print(f"FastAPI running on port {port}")  # ← 동적으로 출력
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 

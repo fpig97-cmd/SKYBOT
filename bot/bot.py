@@ -4017,6 +4017,13 @@ async def on_ready():
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
 
+    if not hasattr(bot, '_fastapi_started'):
+        thread = Thread(target=run_fastapi, daemon=True)
+        thread.start()
+        bot._fastapi_started = True
+        port = int(os.getenv("PORT", 8080))
+        print(f"FastAPI running on port {port}")  # ← 동적으로 출력
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 
 
@@ -4028,20 +4035,24 @@ async def on_interaction(interaction: discord.Interaction):
                     "현재는 이용할 수 없습니다.",
                     ephemeral=True
                 )
-                return 
-
+                return
+            
 if __name__ == "__main__":
-    async def start_bot():
-        """Discord bot을 배경에서 실행"""
-        await bot.start(TOKEN)
+    import asyncio
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
     
-    # Bot을 별도 태스크로 시작
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    async def run_both():
+        """Discord bot과 FastAPI 동시 실행"""
+        # FastAPI 설정
+        config = Config()
+        config.bind = [f"0.0.0.0:{int(os.getenv('PORT', 8080))}"]
+        
+        # 두 태스크를 동시에 실행
+        await asyncio.gather(
+            bot.start(TOKEN),
+            serve(app, config)
+        )
     
-    # Bot 시작 (비동기)
-    bot_task = loop.create_task(start_bot())
-    
-    # FastAPI를 메인 프로세스로 실행 (Railway가 8080 감지)
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", loop="asyncio")
+    asyncio.run(run_both())
+

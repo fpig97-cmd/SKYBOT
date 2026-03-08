@@ -1633,6 +1633,85 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
                 ("실행자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
             ],
         )
+        
+@bot.tree.command(name="공지", description="인증된 모든 유저에게 공지 전송")
+@app_commands.describe(
+    message="공지 내용",
+    color="embed 색상"
+)
+@app_commands.choices(color=[
+    app_commands.Choice(name="파란색", value="blue"),
+    app_commands.Choice(name="초록색", value="green"),
+    app_commands.Choice(name="빨간색", value="red"),
+    app_commands.Choice(name="주황색", value="orange"),
+    app_commands.Choice(name="보라색", value="purple"),
+    app_commands.Choice(name="금색", value="gold"),
+])
+async def announce(interaction: discord.Interaction, message: str, color: app_commands.Choice[str] = None):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    
+    # 색상
+    colors = {
+        "blue": discord.Color.blue(),
+        "green": discord.Color.green(),
+        "red": discord.Color.red(),
+        "orange": discord.Color.orange(),
+        "purple": discord.Color.purple(),
+        "gold": discord.Color.gold(),
+    }
+    selected = colors.get(color.value if color else "blue", discord.Color.blue())
+    
+    # 인증 유저
+    cursor.execute("SELECT DISTINCT discordid FROM users WHERE guildid=? AND verified=1", (guild.id,))
+    verified = [r[0] for r in cursor.fetchall()]
+    
+    cursor.execute("SELECT DISTINCT discordid FROM forcedverified WHERE guildid=?", (guild.id,))
+    forced = [r[0] for r in cursor.fetchall()]
+    
+    all_users = list(set(verified + forced))
+    
+    if not all_users:
+        await interaction.followup.send("인증된 유저가 없습니다.", ephemeral=True)
+        return
+    
+    # Embed
+    embed = discord.Embed(
+        title="📢 공지사항",
+        description=message,
+        color=selected,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_footer(text=f"발신: {interaction.user.name}")
+    if guild.icon:
+        embed.set_thumbnail(url=guild.icon.url)
+    
+    # 공지 채널
+    ch_id = get_log_channel(guild.id, "announce")
+    if ch_id:
+        ch = guild.get_channel(ch_id) or await guild.fetch_channel(ch_id)
+        if ch:
+            await ch.send(embed=embed)
+    
+    # DM
+    success = fail = 0
+    for uid in all_users:
+        try:
+            u = await bot.fetch_user(uid)
+            await u.send(embed=embed)
+            success += 1
+            await asyncio.sleep(0.3)
+        except:
+            fail += 1
+    
+    await interaction.followup.send(
+        f"✅ 공지 완료\n• 대상: {len(all_users)}명\n• 성공: {success}명\n• 실패: {fail}명",
+        ephemeral=True
+    )
 
 @bot.tree.command(name="인증로그보기", description="인증 기록을 확인합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))

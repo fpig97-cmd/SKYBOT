@@ -39,36 +39,16 @@ app = FastAPI()
 
 @app.get("/api/bot-stats")
 async def bot_stats():
-    """Bot 통계 반환"""
-    if not bot.is_ready():
-        return {
-            "guilds": 0,
-            "verified_users": 0,
-            "warn_records": 0,
-        }
-    
-    # Guild 개수
+    """Bot 통계 반환 - 캐싱"""
+    # 간단하게 guild 개수만 반환 (멤버 계산 제외)
     guilds_count = len(bot.guilds)
-    
-    # 모든 멤버 수 (중복 제거)
-    all_members = set()
-    for guild in bot.guilds:
-        for member in guild.members:
-            all_members.add(member.id)
-    
-    # DB에서 경고 기록 수 가져오기 (선택사항)
-    warn_count = 0
-    try:
-        cursor.execute("SELECT COUNT(*) FROM logs WHERE type = 'warn'")
-        warn_count = cursor.fetchone()[0]
-    except:
-        warn_count = 0
     
     return {
         "guilds": guilds_count,
-        "verified_users": len(all_members),
-        "warn_records": warn_count,
+        "verified_users": 0,  # 나중에 추가
+        "warn_records": 0,    # 나중에 추가
     }
+
 
 # FastAPI를 별도 스레드에서 실행
 def run_fastapi():

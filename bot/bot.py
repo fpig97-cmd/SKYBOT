@@ -4017,13 +4017,6 @@ async def on_ready():
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
 
-    if not hasattr(bot, '_fastapi_started'):
-        thread = Thread(target=run_fastapi, daemon=True)
-        thread.start()
-        bot._fastapi_started = True
-        port = int(os.getenv("PORT", 8080))
-        print(f"FastAPI running on port {port}")  # ← 동적으로 출력
-
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 
 
@@ -4038,4 +4031,17 @@ async def on_interaction(interaction: discord.Interaction):
                 return 
 
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    async def start_bot():
+        """Discord bot을 배경에서 실행"""
+        await bot.start(TOKEN)
+    
+    # Bot을 별도 태스크로 시작
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Bot 시작 (비동기)
+    bot_task = loop.create_task(start_bot())
+    
+    # FastAPI를 메인 프로세스로 실행 (Railway가 8080 감지)
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", loop="asyncio")

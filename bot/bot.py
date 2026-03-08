@@ -2750,7 +2750,8 @@ async def warn(
     관리자="관리자 로그 채널",
     보안="보안 로그 채널",
     개발자="개발자 로그 채널",
-    아이템="아이템 구매 로그 채널",  # 🔹 추가
+    아이템="아이템 구매 로그 채널",
+    공지="공지 로그 채널"
 )
 async def set_log_channels(
     interaction: discord.Interaction,
@@ -2759,7 +2760,8 @@ async def set_log_channels(
     관리자: discord.TextChannel | None = None,
     보안: discord.TextChannel | None = None,
     개발자: discord.TextChannel | None = None,
-    아이템: discord.TextChannel | None = None,  # 🔹 추가
+    아이템: discord.TextChannel | None = None,
+    공지: discord.TextChannel | None = None,
 ):
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
@@ -2770,7 +2772,7 @@ async def set_log_channels(
         await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
         return
 
-    changed: list[str] = []
+    changed = []
 
     if 인증 is not None:
         set_log_channel(guild.id, "verify", 인증.id)
@@ -2792,18 +2794,23 @@ async def set_log_channels(
         set_log_channel(guild.id, "dev", 개발자.id)
         changed.append(f"개발자: {개발자.mention}")
 
-    if 아이템 is not None:  # 🔹 추가
+    if 아이템 is not None:
         set_log_channel(guild.id, "item", 아이템.id)
         changed.append(f"아이템: {아이템.mention}")
+
+    if 공지 is not None:
+        set_log_channel(guild.id, "announce", 공지.id)
+        changed.append(f"공지: {공지.mention}")
 
     if not changed:
         await interaction.response.send_message(
             "변경된 채널이 없습니다. 최소 한 개 이상 지정해 주세요.",
-            ephemeral=True,
+            ephemeral=True
         )
         return
 
     msg = "다음 로그 채널이 설정되었습니다:\n" + "\n".join(changed)
+
     await interaction.response.send_message(msg, ephemeral=True)
 
 @bot.tree.command(name="블랙리스트", description="블랙리스트 그룹을 관리합니다. (관리자)")

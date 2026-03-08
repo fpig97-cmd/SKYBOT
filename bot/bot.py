@@ -3555,11 +3555,6 @@ async def ranking(
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 # -- Fast API --
-@app.get("/")
-def root():
-    """테스트용"""
-    return {"test": "FastAPI is working"}
-
 @app.get("/api/bot-stats")
 def bot_stats():
     """Bot 통계"""
@@ -3573,11 +3568,6 @@ def bot_stats():
     except Exception as e:
         print(f"Bot stats error: {e}")
         return {"guilds": 0, "verified_users": 0, "warn_records": 0}
-
-def run_fastapi():
-    """FastAPI 서버를 별도 스레드에서 실행"""
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="critical")
 
 # -- 이벤트 --
 ALLOWED_GUILD_IDS = [

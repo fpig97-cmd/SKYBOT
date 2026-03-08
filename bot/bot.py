@@ -4093,7 +4093,7 @@ async def on_app_command_completion(
 
 @bot.event
 async def on_ready():
-.    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     
     for guild in bot.guilds:
         if guild.id not in ALLOWED_GUILD_IDS:

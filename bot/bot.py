@@ -251,7 +251,21 @@ cursor.execute(
         auto_rollback INTEGER DEFAULT 1
     )"""
 )
-conn.commit() 
+conn.commit()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS shop_items(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    name TEXT,
+    price INTEGER,
+    type TEXT,          -- 'role', 'level', 'exp'
+    role_id INTEGER,    -- type='role' 일 때만 사용
+    level INTEGER,      -- type='level' 일 때만 사용
+    exp INTEGER         -- type='exp' 일 때만 사용
+)
+""")
+conn.commit()
 
 conn.commit() 
 
@@ -2288,26 +2302,6 @@ async def view_blacklist(interaction: discord.Interaction):
 #     )
 
 # -- 경제 명령어 --
-
-# =========================
-# 아이템샵 (역할 지급)
-# =========================
-
-SHOP_ITEMS = {
-
-    "VIP": {
-        "price": 1000,
-        "role_id": 123456789012345678
-    },
-
-    "GOLD": {
-        "price": 3000,
-        "role_id": 123456789012345678
-    }
-
-}
-
-
 # =========================
 # EXP 시스템
 # =========================
@@ -2452,58 +2446,283 @@ async def gamble(interaction: discord.Interaction, amount: int):
 # =========================
 # 아이템샵
 # =========================
-
-@bot.tree.command(name="아이템샵", description="아이템 상점")
+@bot.tree.command(name="아이템샵", description="서버 아이템 목록을 보여줍니다.")
 async def shop(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
 
-    embed = discord.Embed(title="🛒 아이템샵")
+    cursor.execute(
+        """
+        SELECT name, price, type, role_id, level, exp
+        FROM shop_items
+        WHERE guild_id=?
+        ORDER BY price ASC
+        """,
+        (guild.id,),
+    )
+    rows = cursor.fetchall()
 
-    for name,data in SHOP_ITEMS.items():
+    if not rows:
+        await interaction.response.send_message("상점에 등록된 아이템이 없습니다.", ephemeral=True)
+        return
 
-        embed.add_field(
-            name=name,
-            value=f"가격 : {data['price']}",
-            inline=False
-        )
+    lines = []
+    for name, price, itype, role_id, level_val, exp_val in rows:
+        extra = ""
+        if itype == "role" and role_id:
+            role = guild.get_role(role_id)
+            if role:
+                extra = f" → 역할: {role.mention}"
+        elif itype == "level" and level_val is not None:
+            extra = f" → 레벨 +{level_val}"
+        elif itype == "exp" and exp_val is not None:
+            extra = f" → 경험치 +{exp_val}"
 
-    await interaction.response.send_message(embed=embed)
+        lines.append(f"• `{name}` | 가격: `{price}` | 타입: `{itype}`{extra}")
 
+    desc = "\n".join(lines)
+
+    embed = discord.Embed(
+        title="🛒 아이템 상점",
+        description=desc,
+        color=discord.Color.blurple(),
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================
 # 구매
 # =========================
 
-@bot.tree.command(name="구매", description="아이템 구매")
-@app_commands.describe(item="아이템 이름")
-async def buy(interaction: discord.Interaction, item: str):
+@bot.tree.command(name="구매", description="아이템을 구매합니다.")
+@app_commands.describe(이름="구매할 아이템 이름")
+async def buy(interaction: discord.Interaction, 이름: str):
+    await interaction.response.defer(ephemeral=True)
 
-    item_data = SHOP_ITEMS.get(item)
-
-    if item_data is None:
-        await interaction.response.send_message("존재하지 않는 아이템입니다")
+    guild = interaction.guild
+    member = interaction.user
+    if guild is None:
+        await interaction.followup.send("길드에서만 사용 가능합니다.", ephemeral=True)
         return
 
-    user = get_user(interaction.user.id)
-
-    if user[1] < item_data["price"]:
-        await interaction.response.send_message("돈이 부족합니다")
-        return
-
-    role = interaction.guild.get_role(item_data["role_id"])
-
-    await interaction.user.add_roles(role)
-
-    cur.execute(
-        "UPDATE economy SET money = money - ? WHERE user_id=?",
-        (item_data["price"], interaction.user.id)
+    # 1) 아이템 조회
+    cursor.execute(
+        """
+        SELECT price, type, role_id, level, exp
+        FROM shop_items
+        WHERE guild_id=? AND name=?
+        """,
+        (guild.id, 이름),
     )
+    row = cursor.fetchone()
+    if not row:
+        await interaction.followup.send("해당 이름의 아이템이 없습니다.", ephemeral=True)
+        return
+
+    price, item_type, role_id, level_val, exp_val = row
+
+    # 2) 유저 경제 정보
+    user = get_user(member.id)  # (user_id, money, last_daily, exp, level)
+    _, money, _, cur_exp, cur_level = user
+
+    if money < price:
+        await interaction.followup.send("잔액이 부족합니다.", ephemeral=True)
+        return
+
+    # 3) 돈 차감
+    new_money = money - price
+    cur.execute(
+        "UPDATE economy SET money=? WHERE user_id=?",
+        (new_money, member.id),
+    )
+
+    detail = ""
+
+    # 4) 타입별 지급
+    if item_type == "role":
+        if role_id:
+            role = guild.get_role(role_id)
+            if role:
+                try:
+                    await guild.get_member(member.id).add_roles(role, reason="아이템 구매")
+                    detail = f"역할 {role.mention} 지급 완료."
+                except Exception as e:
+                    detail = f"역할 지급 중 오류: {e}"
+            else:
+                detail = "역할을 찾을 수 없습니다."
+        else:
+            detail = "이 아이템에는 역할 ID가 설정되어 있지 않습니다."
+
+    elif item_type == "level":
+        if level_val is not None:
+            add_level = int(level_val)
+            new_level = cur_level + add_level
+            cur.execute(
+                "UPDATE economy SET level=? WHERE user_id=?",
+                (new_level, member.id),
+            )
+            detail = f"레벨 {add_level} 상승! (현재 레벨: {new_level})"
+        else:
+            detail = "이 아이템에는 레벨 값이 설정되어 있지 않습니다."
+
+    elif item_type == "exp":
+        if exp_val is not None:
+            add_exp = int(exp_val)
+            new_exp = cur_exp + add_exp
+            cur.execute(
+                "UPDATE economy SET exp=? WHERE user_id=?",
+                (new_exp, member.id),
+            )
+            detail = f"경험치 {add_exp} 획득! (현재 경험치: {new_exp})"
+        else:
+            detail = "이 아이템에는 경험치 값이 설정되어 있지 않습니다."
+
+    else:
+        await interaction.followup.send("알 수 없는 아이템 타입입니다.", ephemeral=True)
+        return
 
     conn.commit()
 
-    await interaction.response.send_message(
-        f"✅ {item} 구매 완료!"
+    embed = discord.Embed(
+        title="✅ 아이템 구매 완료",
+        color=discord.Color.green(),
+        description=(
+            f"아이템: `{이름}`\n"
+            f"가격: `{price}`\n"
+            f"잔액: `{new_money}`\n\n"
+            f"{detail}"
+        ),
     )
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
+
+# =========================
+# 아이템 추가
+# =========================
+
+@bot.tree.command(name="아이템추가", description="상점 아이템을 추가합니다. (관리자)")
+@app_commands.describe(
+    이름="아이템 이름",
+    가격="아이템 가격 (정수)",
+    종류="아이템 종류 (역할, 레벨, 경험치)",
+    역할="역할 아이템일 경우 지급할 역할",
+    레벨="레벨 아이템일 경우 부여할 레벨 값",
+    경험치="경험치 아이템일 경우 부여할 경험치 양",
+)
+@app_commands.choices(
+    종류=[
+        app_commands.Choice(name="역할", value="role"),
+        app_commands.Choice(name="레벨", value="level"),
+        app_commands.Choice(name="경험치", value="exp"),
+    ]
+)
+async def add_item(
+    interaction: discord.Interaction,
+    이름: str,
+    가격: int,
+    종류: app_commands.Choice[str],
+    역할: Optional[discord.Role] = None,
+    레벨: Optional[int] = None,
+    경험치: Optional[int] = None,
+):
+    # 관리자 체크
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    item_type = 종류.value  # 'role' / 'level' / 'exp'
+
+    # 타입별 필수값 검증
+    if item_type == "role":
+        if 역할 is None:
+            await interaction.response.send_message("역할 아이템은 역할 옵션이 필수입니다.", ephemeral=True)
+            return
+        role_id = 역할.id
+        level_val = None
+        exp_val = None
+
+    elif item_type == "level":
+        if 레벨 is None:
+            await interaction.response.send_message("레벨 아이템은 레벨 값을 넣어야 합니다.", ephemeral=True)
+            return
+        role_id = None
+        level_val = 레벨
+        exp_val = None
+
+    else:  # "exp"
+        if 경험치 is None:
+            await interaction.response.send_message("경험치 아이템은 경험치 값을 넣어야 합니다.", ephemeral=True)
+            return
+        role_id = None
+        level_val = None
+        exp_val = 경험치
+
+    # DB 저장
+    cursor.execute(
+        """
+        INSERT INTO shop_items(guild_id, name, price, type, role_id, level, exp)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            interaction.guild.id,
+            이름,
+            가격,
+            item_type,
+            role_id,
+            level_val,
+            exp_val,
+        ),
+    )
+    conn.commit()
+
+    desc = f"이름: `{이름}`\n가격: `{가격}`\n종류: `{item_type}`"
+    if role_id:
+        desc += f"\n역할: {역할.mention} (`{역할.id}`)"
+    if level_val is not None:
+        desc += f"\n레벨: `{level_val}`"
+    if exp_val is not None:
+        desc += f"\n경험치: `{exp_val}`"
+
+    embed = discord.Embed(
+        title="아이템 추가 완료",
+        description=desc,
+        color=discord.Color.green(),
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# =========================
+# 아이템 제거
+# =========================
+
+@bot.tree.command(name="아이템삭제", description="상점에서 아이템을 삭제합니다. (관리자)")
+@app_commands.describe(이름="삭제할 아이템 이름")
+async def delete_item(interaction: discord.Interaction, 이름: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    # 존재 여부 확인
+    cursor.execute(
+        "SELECT id FROM shop_items WHERE guild_id=? AND name=?",
+        (interaction.guild.id, 이름),
+    )
+    row = cursor.fetchone()
+    if not row:
+        await interaction.response.send_message("해당 이름의 아이템이 없습니다.", ephemeral=True)
+        return
+
+    # 삭제
+    cursor.execute(
+        "DELETE FROM shop_items WHERE guild_id=? AND name=?",
+        (interaction.guild.id, 이름),
+    )
+    conn.commit()
+
+    await interaction.response.send_message(
+        f"`{이름}` 아이템을 삭제했습니다.",
+        ephemeral=True,
+    )
 
 # =========================
 # 유저 정보

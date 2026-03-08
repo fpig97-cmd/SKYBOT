@@ -3557,32 +3557,24 @@ async def ranking(
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
 # -- Fast API --
+@app.get("/")
+def root():
+    """테스트용"""
+    return {"test": "FastAPI is working"}
 
 @app.get("/api/bot-stats")
-async def bot_stats():
+def bot_stats():
     """Bot 통계"""
-    print("=== BOT STATS API CALLED ===")  # ← 호출됐는지 확인
-    
     try:
-        print(f"Bot ready: {bot.is_ready()}")
-        print(f"Guilds: {len(bot.guilds)}")
-        
         guilds_count = len(bot.guilds)
-        
         return {
             "guilds": guilds_count,
             "verified_users": guilds_count * 10,
             "warn_records": 0,
         }
     except Exception as e:
-        print(f"Bot stats error: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()  # ← 전체 에러 출력
-        return {
-            "guilds": 0,
-            "verified_users": 0,
-            "warn_records": 0,
-        }
+        print(f"Bot stats error: {e}")
+        return {"guilds": 0, "verified_users": 0, "warn_records": 0}
 
 def run_fastapi():
     """FastAPI 서버를 별도 스레드에서 실행"""

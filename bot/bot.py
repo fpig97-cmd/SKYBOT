@@ -3994,35 +3994,23 @@ async def on_app_command_completion(
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-
-    # 🔒 시작 시 서버 강제 검사
+    
     for guild in bot.guilds:
         if guild.id not in ALLOWED_GUILD_IDS:
-            print(f"Unauthorized guild found on startup: {guild.name} ({guild.id})")
             await force_leave(guild)
-
-    # 슬래시 커맨드 동기화 
+    
     try:
         if GUILD_ID > 0:
-            guild_obj = discord.Object(id=GUILD_ID)
-            await bot.tree.sync(guild=guild_obj)
+            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         await bot.tree.sync()
     except Exception as e:
-        print("동기화 실패:", e) 
-
-    # 백그라운드 태스크 시작
+        print("동기화 실패:", e)
+    
     if not rank_log_task.is_running():
-        rank_log_task.start() 
-
+        rank_log_task.start()
+        
     if not sync_all_nicknames_task.is_running():
         sync_all_nicknames_task.start()
-
-    if not hasattr(bot, '_fastapi_started'):
-        thread = Thread(target=run_fastapi, daemon=True)
-        thread.start()
-        bot._fastapi_started = True
-        port = int(os.getenv("PORT", 8080))
-        print(f"FastAPI running on port {port}")  # ← 동적으로 출력
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction): 

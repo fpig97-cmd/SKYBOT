@@ -393,7 +393,30 @@ def set_guild_role_id(guild_id: int, role_id: int) -> None:
         """,
         (guild_id, role_id),
     )
-    conn.commit() 
+    conn.commit()
+
+async def send_admin_log(
+    guild: discord.Guild,
+    title: str,
+    description: str | None = None,
+    color: discord.Color = discord.Color.blurple(),
+    fields: list[tuple[str, str, bool]] | None = None,  # (name, value, inline)
+):
+    log_ch_id = get_log_channel(guild.id, "admin")
+    if not log_ch_id:
+        return
+
+    channel = guild.get_channel(log_ch_id) or await guild.fetch_channel(log_ch_id)
+    if not channel:
+        return
+
+    embed = discord.Embed(title=title, color=color, description=description)
+    if fields:
+        for name, value, inline in fields:
+            embed.add_field(name=name, value=value, inline=inline)
+
+    embed.set_footer(text="관리자 로그")
+    await channel.send(embed=embed)
 
 def set_log_channel(guild_id: int, log_type: str, channel_id: int | None):
     if channel_id is None:
@@ -1286,10 +1309,7 @@ async def force_unverify(
 
     # DB에서 강제인증 기록 삭제
     cursor.execute(
-        """
-        DELETE FROM forced_verified
-        WHERE discord_id = ? AND guild_id = ?
-        """,
+        "DELETE FROM forced_verified WHERE discord_id = ? AND guild_id = ?",
         (member.id, guild.id),
     )
     conn.commit()
@@ -1298,7 +1318,6 @@ async def force_unverify(
     try:
         if verify_role and verify_role in member.roles:
             await member.remove_roles(verify_role, reason="강제인증 해제")
-
         if unverify_role and unverify_role not in member.roles:
             await member.add_roles(unverify_role, reason="강제인증 해제")
     except Exception as e:
@@ -1306,7 +1325,7 @@ async def force_unverify(
         await interaction.followup.send(f"역할 변경 중 오류 발생: {e}", ephemeral=True)
         return
 
-    # 웹 로그
+    # 웹 로그 (기존)
     send_log_to_web(
         guild_id=guild.id,
         user_id=member.id,
@@ -1329,6 +1348,42 @@ async def force_unverify(
         f"{member.mention} 님의 강제인증을 해제했습니다.",
         ephemeral=True,
     )
+
+    # ✅ 1) 강제인증 전용 로그 채널에 임베드
+    force_log_ch_id = get_log_channel(guild.id, "force_verify")
+    if force_log_ch_id:
+        force_log_ch = guild.get_channel(force_log_ch_id) or await guild.fetch_channel(force_log_ch_id)
+        if force_log_ch:
+            embed = discord.Embed(
+                title="<:_red:1479810110632099972> 강제인증 해제",
+                color=discord.Color.red(),
+                description="관리자가 강제인증을 해제했습니다.",
+            )
+            embed.add_field(
+                name="대상 유저",
+                value=f"{member.mention} (`{member.id}`)",
+                inline=False,
+            )
+            embed.add_field(
+                name="실행자",
+                value=f"{interaction.user.mention} (`{interaction.user.id}`)",
+                inline=False,
+            )
+            embed.set_footer(text="강제인증 로그")
+            await force_log_ch.send(embed=embed)
+
+    # ✅ 2) 관리자 로그 채널에도 임베드 (send_admin_log 쓴다면)
+    if guild:
+        await send_admin_log(
+            guild,
+            title="🔴 강제인증 해제",
+            description="관리자가 강제인증을 해제했습니다.",
+            color=discord.Color.red(),
+            fields=[
+                ("대상 유저", f"{member.mention} (`{member.id}`)", False),
+                ("실행자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
+            ],
+        )
 
 @bot.tree.command(name="강제인증", description="유저를 강제로 인증 처리합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -1426,6 +1481,21 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
     ) 
 
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # 관리자 로그에도 기록
+    guild = interaction.guild
+    if guild:
+        await send_admin_log(
+            guild,
+            title="<:verfired_green:1479810239619530752> 강제인증 실행",
+            description="관리자가 유저를 강제인증 처리했습니다.",
+            color=discord.Color.green(),
+            fields=[
+                ("대상 유저", f"{user.mention} (`{user.id}`)", False),
+                ("로블록스 닉네임", f"`{roblox_nick}`", False),
+                ("실행자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
+            ],
+        )
 
 @bot.tree.command(name="인증로그보기", description="인증 기록을 확인합니다. (관리자)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -3427,4 +3497,3 @@ async def on_interaction(interaction: discord.Interaction):
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-    

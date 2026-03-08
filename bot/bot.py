@@ -4220,7 +4220,7 @@ async def update_status_loop():
     total_users = sum(g.member_count for g in bot.guilds)
     ping = round(bot.latency * 1000)
 
-    embed = discord.Embed(title="🤖 봇 상태 (자동 갱신)", color=discord.Color.green())
+    embed = discord.Embed(title="🤖 봇 상태", color=discord.Color.green())
     embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
     embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
     embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)

@@ -4196,10 +4196,8 @@ async def force_leave(guild: discord.Guild) -> None:
     except Exception as e:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
 
-prefix_command_count = 0
-slash_command_count = 0
 status_channel_id = 1480268362889166989
-status_message_id = None
+status_message_id = 1480476381535273092
 # -----------------------------
 # 15초 루프 (메시지 수정 + 명령어 수 계산)
 # -----------------------------
@@ -4214,11 +4212,6 @@ async def update_status_loop():
     if not channel:
         print("채널을 찾을 수 없음")
         return
-
-    # 루프 안에서 명령어 수 계산
-    prefix_command_count = len(bot.commands)
-    slash_command_count = len(list(bot.tree.walk_commands()))
-
     # 봇 상태 정보
     uptime = int(time.time() - bot_start_time)
     hours = uptime // 3600

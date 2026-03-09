@@ -3772,6 +3772,133 @@ async def set_status_channel(interaction: Interaction, channel: discord.TextChan
         return
     status_channel_id = channel.id
     await interaction.response.send_message(f"{channel.mention} 채널로 상태 갱신이 설정되었습니다.", ephemeral=True)
+
+patch_channel_ids: list[int] = []
+
+# 예약 패치 목록
+scheduled_patches: list[dict] = []
+
+# -----------------------------
+# /패치채널지정
+# -----------------------------
+@bot.tree.command(
+    name="패치채널지정",
+    description="공지/패치 메시지를 보낼 채널 추가 (관리자)"
+)
+@app_commands.describe(channel="공지 메시지를 보낼 텍스트 채널")
+async def add_patch_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    if channel.id not in patch_channel_ids:
+        patch_channel_ids.append(channel.id)
+        await interaction.response.send_message(
+            f"{channel.mention} 채널이 패치 공지 채널에 추가되었습니다.", ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"{channel.mention} 채널은 이미 목록에 있습니다.", ephemeral=True
+        )
+
+# -----------------------------
+# /패치예약
+# -----------------------------
+@bot.tree.command(
+    name="패치예약",
+    description="제작자 전용: 지정 시간에 패치 자동 전송"
+)
+@app_commands.describe(
+    title="임베드 제목",
+    content="임베드 내용",
+    color="16진수 색상 (예: FF00AA)",
+    image_url="상단에 표시될 이미지 URL",
+    time="예약 시간 (YYYY-MM-DD HH:MM, 24시간제)"
+)
+async def schedule_patch(
+    interaction: discord.Interaction,
+    title: str,
+    content: str,
+    color: str,
+    image_url: str,
+    time: str
+):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("제작자만 사용할 수 있습니다.", ephemeral=True)
+        return
+
+    try:
+        schedule_time = datetime.strptime(time, "%Y-%m-%d %H:%M")
+    except:
+        await interaction.response.send_message("시간 형식이 잘못되었습니다. 예: 2026-03-09 21:30", ephemeral=True)
+        return
+
+    scheduled_patches.append({
+        "time": schedule_time,
+        "title": title,
+        "content": content,
+        "color": color,
+        "image_url": image_url,
+        "guild_id": interaction.guild.id
+    })
+
+    await interaction.response.send_message(f"패치가 {schedule_time}에 예약되었습니다.", ephemeral=True)
+
+# -----------------------------
+# 패치 전송 함수
+# -----------------------------
+async def send_patch_embed(guild: discord.Guild, embed: discord.Embed):
+    # 1️⃣ DM 전송 (중복 방지)
+    sent_users = set()
+    success, fail = 0, 0
+    for member in guild.members:
+        if member.bot or member.id in sent_users:
+            continue
+        try:
+            await member.send(embed=embed)
+            sent_users.add(member.id)
+            success += 1
+            await asyncio.sleep(1)  # Rate Limit 보호
+        except:
+            fail += 1
+
+    # 2️⃣ 공지 채널 전송 (중복 제거)
+    unique_channels = list(set(patch_channel_ids))
+    for cid in unique_channels:
+        channel = bot.get_channel(cid)
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except:
+                pass
+
+    print(f"[패치 전송 완료] DM 성공: {success}, 실패: {fail}, 채널 전송: {len(unique_channels)}개")
+
+# -----------------------------
+# 예약 루프 (1분마다 확인)
+# -----------------------------
+@tasks.loop(seconds=60)
+async def patch_scheduler_loop():
+    now = datetime.now()
+    for patch_info in scheduled_patches[:]:
+        if now >= patch_info["time"]:
+            guild = bot.get_guild(patch_info["guild_id"])
+            if guild:
+                # Embed 생성
+                try:
+                    embed_color = int(patch_info["color"], 16)
+                except:
+                    embed_color = 0x00FF00
+                embed = discord.Embed(
+                    title=patch_info["title"],
+                    description=patch_info["content"],
+                    color=embed_color
+                )
+                if patch_info["image_url"]:
+                    embed.set_image(url=patch_info["image_url"])
+
+                await send_patch_embed(guild, embed)
+            scheduled_patches.remove(patch_info)
 # ------------------------
 # 15초 루프: 상태 자동 갱신
 # ------------------------
@@ -3784,7 +3911,8 @@ async def update_status():
     channel = bot.get_channel(status_channel_id)
     if not channel:
         return
-
+    if not patch_scheduler_loop.is_running():
+        patch_scheduler_loop.start()
     # 상태 embed 생성
     embed = generate_status_embed(title="🤖 봇 상태 (자동 갱신)")
 

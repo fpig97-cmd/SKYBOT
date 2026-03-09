@@ -4241,7 +4241,7 @@ async def update_status_loop():
     embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
     embed.add_field(
         name="📦 명령어 수",
-        value=f"Prefix: {prefix_command_count}, Slash: {slash_command_count}",
+        value=f"34",
         inline=False
     )
 

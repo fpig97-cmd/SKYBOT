@@ -4196,6 +4196,17 @@ async def force_leave(guild: discord.Guild) -> None:
     except Exception as e:
         print(f"[FORCE_LEAVE] Failed to leave guild {guild.id}: {e}") 
 
+prefix_command_count = 0
+slash_command_count = 0
+status_channel_id = 1480268362889166989
+status_message_id = None
+
+async def update_command_stats():
+    global prefix_command_count, slash_command_count
+    prefix_command_count = len(bot.commands)
+    slash_command_count = len(list(bot.tree.walk_commands()))
+    print(f"[명령어 통계] Prefix: {prefix_command_count}, Slash: {slash_command_count}")
+
 @tasks.loop(seconds=5)
 async def update_status_loop():
     global status_message_id
@@ -4208,19 +4219,18 @@ async def update_status_loop():
         print("채널을 찾을 수 없음")
         return
 
-    # 봇 상태 정보
     uptime = int(time.time() - bot_start_time)
     hours = uptime // 3600
     minutes = (uptime % 3600) // 60
     seconds = uptime % 60
     status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
-    
+
     cpu_usage = psutil.cpu_percent(interval=0.5)
     memory_usage = psutil.virtual_memory().percent
     total_users = sum(g.member_count for g in bot.guilds)
     ping = round(bot.latency * 1000)
 
-    embed = discord.Embed(title="🤖 봇 상태", color=discord.Color.green())
+    embed = discord.Embed(title="🤖 봇 상태 (자동 갱신)", color=discord.Color.green())
     embed.add_field(name="⏱ 업타임", value=f"{hours}시간 {minutes}분 {seconds}초", inline=False)
     embed.add_field(name="📡 봇 상태", value=f"{status_emoji} {BOT_STATUS}", inline=False)
     embed.add_field(name="🌍 서버 수", value=f"{len(bot.guilds)}개", inline=False)
@@ -4228,14 +4238,13 @@ async def update_status_loop():
     embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
     embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
     embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
+    embed.add_field(name="📝 명령어 수", value=f"Prefix: {prefix_command_count}, Slash: {slash_command_count}", inline=False)
 
     try:
         if status_message_id:
-            # 기존 메시지 수정
             msg = await channel.fetch_message(status_message_id)
             await msg.edit(embed=embed)
         else:
-            # 첫 메시지 전송 후 ID 저장
             msg = await channel.send(embed=embed)
             status_message_id = msg.id
     except Exception as e:

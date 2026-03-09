@@ -4200,8 +4200,6 @@ prefix_command_count = 0
 slash_command_count = 0
 status_channel_id = 1480268362889166989
 status_message_id = None
-
-async def update_command_stats():
 # -----------------------------
 # 15초 루프 (메시지 수정 + 명령어 수 계산)
 # -----------------------------

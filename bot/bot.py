@@ -4214,7 +4214,7 @@ async def update_status_loop():
     minutes = (uptime % 3600) // 60
     seconds = uptime % 60
     status_emoji = STATUS_EMOJIS.get(BOT_STATUS, "⚪")
-
+    
     cpu_usage = psutil.cpu_percent(interval=0.5)
     memory_usage = psutil.virtual_memory().percent
     total_users = sum(g.member_count for g in bot.guilds)

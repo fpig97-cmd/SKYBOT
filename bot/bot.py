@@ -4202,12 +4202,10 @@ status_channel_id = 1480268362889166989
 status_message_id = None
 
 async def update_command_stats():
-    global prefix_command_count, slash_command_count
-    prefix_command_count = len(bot.commands)
-    slash_command_count = len(list(bot.tree.walk_commands()))
-    print(f"[명령어 통계] Prefix: {prefix_command_count}, Slash: {slash_command_count}")
-
-@tasks.loop(seconds=5)
+# -----------------------------
+# 15초 루프 (메시지 수정 + 명령어 수 계산)
+# -----------------------------
+@tasks.loop(seconds=15)
 async def update_status_loop():
     global status_message_id
     if not status_channel_id:
@@ -4219,6 +4217,11 @@ async def update_status_loop():
         print("채널을 찾을 수 없음")
         return
 
+    # 루프 안에서 명령어 수 계산
+    prefix_command_count = len(bot.commands)
+    slash_command_count = len(list(bot.tree.walk_commands()))
+
+    # 봇 상태 정보
     uptime = int(time.time() - bot_start_time)
     hours = uptime // 3600
     minutes = (uptime % 3600) // 60
@@ -4238,7 +4241,11 @@ async def update_status_loop():
     embed.add_field(name="⚡ 핑", value=f"{ping}ms", inline=True)
     embed.add_field(name="🧠 메모리 사용량", value=f"{memory_usage}%", inline=True)
     embed.add_field(name="📊 CPU 사용량", value=f"{cpu_usage}%", inline=True)
-    embed.add_field(name="📝 명령어 수", value=f"Prefix: {prefix_command_count}, Slash: {slash_command_count}", inline=False)
+    embed.add_field(
+        name="📦 명령어 수",
+        value=f"Prefix: {prefix_command_count}, Slash: {slash_command_count}",
+        inline=False
+    )
 
     try:
         if status_message_id:

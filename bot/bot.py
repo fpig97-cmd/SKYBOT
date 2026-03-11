@@ -3522,6 +3522,226 @@ async def userinfo(interaction: discord.Interaction, member: discord.Member | No
     )
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
+# =========================
+# 경제 복구, 현황
+# =========================
+@bot.tree.command(name="경제초기화", description="경제 데이터를 초기화합니다. (제작자)")
+async def reset_economy(interaction: discord.Interaction):
+
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message(
+            "❌ 제작자만 사용할 수 있습니다.",
+            ephemeral=True
+        )
+        return
+
+    cur.execute(
+        "DELETE FROM economy"
+    )
+
+    conn.commit()
+
+    await interaction.response.send_message(
+        "💣 모든 경제 데이터가 초기화되었습니다."
+    )
+
+@bot.tree.command(name="레벨추가", description="유저 레벨을 추가합니다.")
+@app_commands.describe(
+    유저="레벨을 추가할 유저",
+    레벨="추가할 레벨"
+)
+async def add_level(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    레벨: int
+):
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message(
+            "관리자만 사용 가능합니다.",
+            ephemeral=True
+        )
+        return
+
+    if 레벨 <= 0:
+        await interaction.response.send_message(
+            "1 이상의 숫자를 입력하세요.",
+            ephemeral=True
+        )
+        return
+
+    user = get_user(유저.id)
+    current_level = user[4]
+
+    new_level = current_level + 레벨
+
+    cur.execute(
+        "UPDATE economy SET level=? WHERE user_id=?",
+        (new_level, 유저.id)
+    )
+
+    conn.commit()
+
+    embed = discord.Embed(
+        title="⭐ 레벨 추가",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(name="대상", value=유저.mention)
+    embed.add_field(name="추가 레벨", value=f"+{레벨}")
+    embed.add_field(name="현재 레벨", value=new_level)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="경제백업다운로드", description="경제 백업 파일을 다운로드합니다.")
+async def download_backup(interaction: discord.Interaction):
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용 가능", ephemeral=True)
+        return
+
+    try:
+
+        file = discord.File("economy_backup.json")
+
+        await interaction.response.send_message(
+            content="📦 경제 백업 파일입니다.",
+            file=file,
+            ephemeral=True
+        )
+
+    except:
+
+        await interaction.response.send_message(
+            "❌ 백업 파일이 없습니다.\n먼저 `/경제백업`을 실행하세요.",
+            ephemeral=True
+        )
+
+@bot.tree.command(name="경제복구", description="경제 데이터를 JSON으로 복구")
+async def restore_economy(interaction: discord.Interaction):
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용 가능", ephemeral=True)
+        return
+
+    try:
+
+        with open("economy_backup.json","r",encoding="utf-8") as f:
+            data = json.load(f)
+
+        for user in data:
+
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO economy(user_id,money,last_daily,exp,level)
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    user["user_id"],
+                    user["money"],
+                    user["last_daily"],
+                    user["exp"],
+                    user["level"]
+                )
+            )
+
+        conn.commit()
+
+        await interaction.response.send_message(
+            "✅ 경제 데이터 복구 완료"
+        )
+
+    except Exception as e:
+
+        await interaction.response.send_message(
+            f"복구 실패 : {e}"
+        )
+
+import json
+
+@bot.tree.command(name="경제백업", description="경제 데이터를 JSON으로 백업합니다.")
+async def backup_economy(interaction: discord.Interaction):
+
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("관리자만 사용 가능", ephemeral=True)
+        return
+
+    try:
+
+        cur.execute(
+            "SELECT user_id, money, last_daily, exp, level FROM economy"
+        )
+
+        rows = cur.fetchall()
+
+        data = []
+
+        for row in rows:
+
+            data.append({
+                "user_id": row[0],
+                "money": row[1],
+                "last_daily": row[2],
+                "exp": row[3],
+                "level": row[4]
+            })
+
+        with open("economy_backup.json","w",encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+
+        await interaction.response.send_message(
+            f"💾 경제 데이터 백업 완료!\n유저 수: {len(data)}명"
+        )
+
+    except Exception as e:
+
+        await interaction.response.send_message(
+            f"백업 실패: {e}"
+        )
+
+@bot.tree.command(name="내순위", description="내 랭킹 위치 확인")
+async def my_rank(interaction: discord.Interaction):
+
+    cur.execute(
+        "SELECT user_id FROM economy ORDER BY money DESC"
+    )
+
+    rows = cur.fetchall()
+
+    rank = 1
+
+    for row in rows:
+
+        if row[0] == interaction.user.id:
+            break
+
+        rank += 1
+
+    await interaction.response.send_message(
+        f"🏆 당신의 돈 랭킹 : **{rank}위**"
+    )
+
+@bot.tree.command(name="내경제", description="내 경제 정보를 확인합니다.")
+async def my_economy(interaction: discord.Interaction):
+
+    user = get_user(interaction.user.id)
+
+    money = user[1]
+    exp = user[3]
+    level = user[4]
+
+    need = 50 + (level * 25)
+
+    embed = discord.Embed(
+        title=f"{interaction.user.name} 경제 정보",
+        color=discord.Color.gold()
+    )
+
+    embed.add_field(name="💰 돈", value=f"{money}", inline=True)
+    embed.add_field(name="⭐ 레벨", value=f"{level}", inline=True)
+    embed.add_field(name="📊 EXP", value=f"{exp}/{need}", inline=True)
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================
 # 송금

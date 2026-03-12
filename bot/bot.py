@@ -34,6 +34,8 @@ from discord.ext import commands
 from discord import Interaction
 from discord import app_commands
 
+from discord.ui import Modal, TextInput
+
 conn = sqlite3.connect("bot.db")
 cursor = conn.cursor()
 
@@ -312,6 +314,16 @@ cursor.execute(
         admin_role_id TEXT
     )"""
 ) 
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS jackpot (
+    id INTEGER PRIMARY KEY,
+    money INTEGER
+)
+""")
+
+cur.execute("INSERT OR IGNORE INTO jackpot (id, money) VALUES (1,0)")
+conn.commit()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS logchannels (
@@ -2445,7 +2457,40 @@ async def sync_commands(interaction: discord.Interaction):
 
         await interaction.followup.send(msg, ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"동기화 중 오류: {e}", ephemeral=True) 
+        await interaction.followup.send(f"동기화 중 오류: {e}", ephemeral=True)
+
+@bot.tree.command(name="돈제거", description="유저의 돈을 제거합니다")
+@app_commands.describe(
+    user="대상 유저",
+    amount="제거할 금액"
+)
+async def remove_money(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    amount: int
+):
+
+    if amount <= 0:
+        await interaction.response.send_message("금액 오류")
+        return
+
+    data = get_user(user.id)
+
+    if not data:
+        await interaction.response.send_message("유저 데이터 없음")
+        return
+
+    cur.execute(
+        "UPDATE economy SET money = money - ? WHERE user_id=?",
+        (amount, user.id)
+    )
+
+    conn.commit()
+
+    await interaction.response.send_message(
+        f"💸 돈 제거 완료\n유저 : {user.mention}\n제거 금액 : {amount}"
+    )
+    
 @bot.tree.command(name="처벌추가", description="경고 횟수에 따른 처벌 규칙을 추가합니다. (관리자)")
 @app_commands.describe(
     경고횟수="이 횟수에 도달하면 처벌 적용",
@@ -3043,6 +3088,115 @@ async def shop(interaction: discord.Interaction):
     view = ShopView(guild, items)
     embed = view.make_page_embed()
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+    
+class DramaticGambleModal(Modal, title="극적 도박"):
+
+    amount = TextInput(
+        label="도박 금액",
+        placeholder="금액 입력",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+
+        try:
+            amount = int(self.amount.value)
+        except:
+            await interaction.response.send_message("금액 오류", ephemeral=True)
+            return
+
+        user = get_user(interaction.user.id)
+
+        if amount <= 0:
+            await interaction.response.send_message("금액 오류", ephemeral=True)
+            return
+
+        if user[1] < amount:
+            await interaction.response.send_message("돈이 부족합니다", ephemeral=True)
+            return
+
+        # 잭팟 적립 (1%)
+        jackpot_add = int(amount * 0.01)
+
+        cur.execute(
+            "UPDATE jackpot SET money = money + ? WHERE id=1",
+            (jackpot_add,)
+        )
+
+        r = random.random()
+
+        # 잭팟 터짐 (0.1%)
+        if r >= 0.999:
+
+            cur.execute("SELECT money FROM jackpot WHERE id=1")
+            jackpot_money = cur.fetchone()[0]
+
+            cur.execute(
+                "UPDATE economy SET money = money + ? WHERE user_id=?",
+                (jackpot_money, interaction.user.id)
+            )
+
+            cur.execute(
+                "UPDATE jackpot SET money = 0 WHERE id=1"
+            )
+
+            conn.commit()
+
+            await interaction.response.send_message(
+                f"👑 전설의 잭팟!!!\n획득 : {jackpot_money}"
+            )
+            return
+
+        # 실패
+        if r <= 0.70:
+
+            cur.execute(
+                "UPDATE economy SET money = money - ? WHERE user_id=?",
+                (amount, interaction.user.id)
+            )
+            conn.commit()
+
+            await interaction.response.send_message(
+                f"💀 극적 도박 실패\n잃은 돈 : {amount}"
+            )
+            return
+
+        elif r <= 0.90:
+            multi = 2
+        elif r <= 0.98:
+            multi = 5
+        elif r <= 0.999:
+            multi = 10
+
+        win = amount * multi
+
+        cur.execute(
+            "UPDATE economy SET money = money + ? WHERE user_id=?",
+            (win, interaction.user.id)
+        )
+
+        conn.commit()
+
+        await interaction.response.send_message(
+            f"🔥 극적 도박 성공!\n배율 : x{multi}\n획득 : {win}"
+        )
+
+
+@bot.tree.command(name="극적도박", description="극적인 도박을 합니다")
+async def dramatic_gamble(interaction: discord.Interaction):
+
+    modal = DramaticGambleModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="잭팟", description="현재 잭팟 금액")
+async def jackpot(interaction: discord.Interaction):
+
+    cur.execute("SELECT money FROM jackpot WHERE id=1")
+    money = cur.fetchone()[0]
+
+    await interaction.response.send_message(
+        f"🎰 현재 잭팟 : {money}"
+    )
 
 @bot.tree.command(name="구매", description="상점 아이템을 구매합니다.")
 @app_commands.describe(이름="구매할 아이템 이름")

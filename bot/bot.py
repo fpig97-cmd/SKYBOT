@@ -34,6 +34,49 @@ from discord.ext import commands
 from discord import Interaction
 from discord import app_commands
 
+conn = sqlite3.connect("bot.db")
+cursor = conn.cursor()
+
+# 버전
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS version(
+    id INTEGER PRIMARY KEY,
+    n INTEGER,
+    x INTEGER,
+    y INTEGER
+)
+""")
+
+# 패치로그
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS patch_logs(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version TEXT,
+    title TEXT,
+    content TEXT,
+    timestamp INTEGER
+)
+
+""")
+# 경제 히스토리
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS economy_history(
+    user_id INTEGER,
+    money INTEGER,
+    level INTEGER,
+    timestamp INTEGER
+)
+
+""")
+
+cursor.execute("SELECT * FROM version WHERE id=1")
+
+if cursor.fetchone() is None:
+    cursor.execute(
+        "INSERT INTO version VALUES (1,1,1,1)"
+    )
+    conn.commit()
+
 app = FastAPI()
 
 intents = discord.Intents.default()
@@ -663,6 +706,33 @@ class VerifyView(discord.ui.View):
         self.code = code
         self.expire_time = expire_time
         self.guild_id = guild_id 
+
+def get_version():
+
+    cursor.execute("SELECT n,x,y FROM version WHERE id=1")
+    n,x,y = cursor.fetchone()
+
+    return f"{n}.{x}.{y}"
+
+def increase_version():
+
+    cursor.execute("SELECT n,x,y FROM version WHERE id=1")
+    n,x,y = cursor.fetchone()
+
+    y += 1
+
+    if y > 9:
+        y = 0
+        x += 1
+
+    cursor.execute(
+        "UPDATE version SET n=?,x=?,y=? WHERE id=1",
+        (n,x,y)
+    )
+
+    conn.commit()
+
+    return f"{n}.{x}.{y}"
 
 def send_log_to_web(guild_id: int, user_id: int, action: str, detail: str):
     try:
@@ -1560,6 +1630,57 @@ async def force_verify(interaction: discord.Interaction, user: discord.User, rob
                 ("실행자", f"{interaction.user.mention} (`{interaction.user.id}`)", False),
             ],
         )
+
+@bot.tree.command(name="버전", description="현재 봇 버전")
+async def version_cmd(interaction: discord.Interaction):
+
+    version = get_version()
+
+    await interaction.response.send_message(
+        f"현재 버전 : **v{version}**"
+    )
+
+@bot.tree.command(name="패치공지", description="패치 공지를 전송합니다.")
+@app_commands.describe(
+제목="패치 제목",
+내용="패치 내용",
+채널="공지 채널"
+)
+async def patch_notice(
+interaction: discord.Interaction,
+제목: str,
+내용: str,
+채널: discord.TextChannel
+):
+
+    version = increase_version()
+
+    now = int(time.time())
+
+    cursor.execute(
+        "INSERT INTO patch_logs (version,title,content,timestamp) VALUES (?,?,?,?)",
+        (version,제목,내용,now)
+    )
+    conn.commit()
+
+    embed = discord.Embed(
+        title=f"📢 패치 공지 | v{version}",
+        description=f"**{제목}**\n\n{내용}",
+        color=0x38bdf8
+    )
+
+    embed.add_field(
+        name="패치 시간",
+        value=f"<t:{now}:F>",
+        inline=False
+    )
+
+    await 채널.send(embed=embed)
+
+    await interaction.response.send_message(
+        f"패치 공지 전송 완료\n버전 : v{version}",
+        ephemeral=True
+    )
 
 @bot.tree.command(name="공지", description="인증된 모든 유저에게 공지 전송")
 @app_commands.describe(

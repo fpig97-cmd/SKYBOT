@@ -4377,7 +4377,7 @@ def bot_stats():
         traceback.print_exc()
         return {"guilds": 0, "verified_users": 0, "warn_records": 0}
 
-@api.get("/api/economy/graph")
+@app.get("/api/economy/graph")
 async def graph():
 
     return [
@@ -4388,7 +4388,7 @@ async def graph():
         {"label":"Fri","value":2100}
     ]
 
-@api.get("/api/economy/stats")
+@app.get("/api/economy/stats")
 async def economy_stats():
 
     total_money = sum(u["money"] for u in economy.values()) if economy else 0
@@ -4399,7 +4399,7 @@ async def economy_stats():
         "avg_money": total_money // max(len(economy),1)
     }
 
-@api.get("/api/economy/leaderboard")
+@app.get("/api/economy/leaderboard")
 async def leaderboard():
 
     data = sorted(

@@ -4376,7 +4376,46 @@ def bot_stats():
         import traceback
         traceback.print_exc()
         return {"guilds": 0, "verified_users": 0, "warn_records": 0}
-    
+
+@api.get("/api/economy/graph")
+async def graph():
+
+    return [
+        {"label":"Mon","value":1000},
+        {"label":"Tue","value":1200},
+        {"label":"Wed","value":1500},
+        {"label":"Thu","value":1800},
+        {"label":"Fri","value":2100}
+    ]
+
+@api.get("/api/economy/stats")
+async def economy_stats():
+
+    total_money = sum(u["money"] for u in economy.values()) if economy else 0
+
+    return {
+        "total_money": total_money,
+        "users": len(economy),
+        "avg_money": total_money // max(len(economy),1)
+    }
+
+@api.get("/api/economy/leaderboard")
+async def leaderboard():
+
+    data = sorted(
+        economy.items(),
+        key=lambda x: x[1]["money"],
+        reverse=True
+    )[:10]
+
+    return [
+        {
+            "name": info["name"],
+            "money": info["money"]
+        }
+        for uid, info in data
+    ]
+
 if __name__ == "__main__":
     import asyncio
     from hypercorn.asyncio import serve

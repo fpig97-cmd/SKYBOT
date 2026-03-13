@@ -1709,6 +1709,17 @@ async def version_cmd(interaction: discord.Interaction):
         f"현재 버전 : **v{version}**"
     )
 
+@bot.tree.command(name="ARS", description="텍스트를 ARS 음성으로 변환")
+async def ars(interaction: discord.Interaction, *, text: str):
+    # TTS 변환 (속도 느리게 설정하여 ARS 느낌)
+    tts = gTTS(text=text, lang='ko', slow=True)
+    filename = "ars_message.mp3"
+    tts.save(filename)
+
+    # 파일로 전송
+    await interaction.response.send_message(file=discord.File(filename))
+    os.remove(filename)  # 전송 후 삭제
+
 @bot.tree.command(name="패치공지", description="패치 공지 작성")
 async def patch_notice(interaction: discord.Interaction):
 
@@ -4802,4 +4813,5 @@ if __name__ == "__main__":
         )
     
     asyncio.run(run_both())
+
 

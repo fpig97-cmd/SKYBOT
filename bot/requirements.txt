@@ -1,4 +1,5 @@
 discord.py
+gTTS
 fastapi
 hypercorn
 aiohttp

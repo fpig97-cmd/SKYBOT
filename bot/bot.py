@@ -1710,7 +1710,7 @@ async def version_cmd(interaction: discord.Interaction):
         f"현재 버전 : **v{version}**"
     )
 
-@bot.tree.command(name="ARS", description="텍스트를 ARS 음성으로 변환")
+@bot.tree.command(name="ars", description="텍스트를 ARS 음성으로 변환")
 async def ars(interaction: discord.Interaction, *, text: str):
     # TTS 변환 (속도 느리게 설정하여 ARS 느낌)
     tts = gTTS(text=text, lang='ko', slow=True)
@@ -4814,6 +4814,7 @@ if __name__ == "__main__":
         )
     
     asyncio.run(run_both())
+
 
 
 

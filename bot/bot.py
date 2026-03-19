@@ -1,7 +1,7 @@
-from gtts import gTTS
 import os
 import io
 import asyncio
+import matplotlib.pyplot as plt
 import re
 import json
 import sqlite3
@@ -11,12 +11,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import psutil
 import json
+import asyncio
+from hypercorn.asyncio import serve
+from hypercorn.config import Config
 
 import aiohttp
+
 import discord
 from discord import app_commands
 from discord.ext import tasks
 from discord.ext import commands
+
 from dotenv import load_dotenv
 import requests
 from datetime import datetime
@@ -26,6 +31,7 @@ import random
 import time
 
 from discord.ui import View, button
+from discord.ui import View, Button
 from discord import ButtonStyle
 
 from fastapi import FastAPI
@@ -39,6 +45,18 @@ from discord.ui import Modal, TextInput
 
 conn = sqlite3.connect("bot.db")
 cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS community_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER,
+    author_id INTEGER,
+    title TEXT,
+    content TEXT,
+    created_at TEXT
+)
+""")
+conn.commit()
 
 # 버전
 cursor.execute("""
@@ -110,7 +128,8 @@ if cursor.fetchone() is None:
 app = FastAPI()
 
 intents = discord.Intents.default()
-intents.members = True 
+intents.members = True
+
 bot = commands.Bot(command_prefix="!", intents=intents) 
 
 conn = sqlite3.connect("economy.db")
@@ -146,7 +165,21 @@ def get_user(user_id):
 
 VERIFY_ROLE_ID = 1461636782176075831
 UNVERIFY_ROLE_ID = 1478713261074550956
-ADMIN_LOG_CHANNEL_ID = 1468191799855026208 
+ADMIN_LOG_CHANNEL_ID = 1468191799855026208
+
+ADDITIONAL_ADMIN_IDS = {
+    794811652620156949,
+    1246023821492752429,
+    1185946251171217519,
+    1206574701380636692
+}
+
+PAYOUT_ALLOWED_USER_IDS = {
+    794811652620156949,
+    1246023821492752429,
+    1185946251171217519,
+    1206574701380636692
+}
 
 emoji = {"<:X_red:1479810084900044851>",
           "<:_red:1479810110632099972>",
@@ -155,7 +188,7 @@ emoji = {"<:X_red:1479810084900044851>",
           "<:announce_blue:1479810147911205006>",
           "<:verfired_green:1479810239619530752>"}
 
-API_BASE = "https://web-api-production-69fc.up.railway.app"
+API_BASE = "https://web-api-production-091e.up.railway.app"
 
 def increase_version():
 
@@ -201,7 +234,6 @@ def is_already_verified(guild_id: int, user_id: int) -> bool:
 
 LOG_API_URL = "https://web-api-production-69fc.up.railway.app"
 
-
 COMMANDS_DISABLED = False
 
 DEVELOPER_ID = 1276176866440642561 
@@ -225,7 +257,31 @@ RANK_API_KEY = os.getenv("RANK_API_KEY")
 
 CREATOR_ROBLOX_NICK = "Sky_Lunarx"
 CREATOR_ROBLOX_REAL = "Sky_Lunarx"
-CREATOR_DISCORD_NAME = "Lunar" 
+CREATOR_DISCORD_NAME = "Lunar"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+def is_toxic(text: str) -> tuple[bool, list[str]]:
+    if not OPENAI_API_KEY:
+        return False, []
+
+    url = "https://api.openai.com/v1/moderations"
+    
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    
+    payload = {
+        "model": "omni-moderation-latest",
+        "input": [{"type": "text", "text": text}],
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=10)
+    resp.raise_for_status()
+    result = resp.json()["results"][0]
+    flagged = result["flagged"]
+    categories = [k for k, v in result["categories"].items() if v]
+    return flagged, categories
 
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN이 .env에 설정되어 있지 않습니다.") 
@@ -433,7 +489,60 @@ CREATE TABLE IF NOT EXISTS command_logs(
 """)
 conn.commit()
 
-conn.commit() 
+conn.commit()
+
+class CommunityFormModal(Modal, title="커뮤니티 양식 제출"):
+    title_input = TextInput(
+        label="제목",
+        placeholder="제목을 입력하세요",
+        max_length=100
+    )
+    content_input = TextInput(
+        label="내용",
+        style=discord.TextStyle.paragraph,
+        placeholder="내용(양식)에 맞게 적어 주세요",
+        max_length=2000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        content = self.content_input.value
+
+        # AI 악성 검사
+        flagged, categories = is_toxic(content)
+        if flagged:
+            msg = "해당 내용은 이용 수칙을 위반하여 등록이 차단되었습니다.\n"
+            if categories:
+                msg += f"감지된 항목: {', '.join(categories)}"
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        guild_id = interaction.guild.id if interaction.guild else 0
+
+        cursor.execute(
+            "INSERT INTO community_posts (guild_id, author_id, title, content, created_at) "
+            "VALUES (?, ?, ?, ?, datetime('now'))",
+            (
+                guild_id,
+                interaction.user.id,
+                self.title_input.value,
+                content,
+            ),
+        )
+        conn.commit()
+        post_id = cursor.lastrowid
+
+        embed = discord.Embed(
+            title=f"커뮤니티 양식 제출 완료 (#{post_id})",
+            description=content,
+            color=discord.Color.blurple()
+        )
+        embed.set_author(
+            name=interaction.user.display_name,
+            icon_url=interaction.user.display_avatar.url
+        )
+        embed.add_field(name="제목", value=self.title_input.value, inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class CommandLogView(View):
     def __init__(self, pages: list[str]):
@@ -473,14 +582,16 @@ def set_senior_officer_role_id(guild_id: int, role_id: int) -> None:
            VALUES(?, ?)""",
         (guild_id, role_id),
     )
-    conn.commit() 
-
+    conn.commit()
+    
 def check_is_officer(rank_num: int, rank_name: str) -> tuple[bool, bool]:
     """위관급, 영관급 여부 체크 - (is_junior_officer, is_senior_officer)"""
+    
     is_junior = 70 <= rank_num <= 120
     junior_keywords = ["Second Lieutenant", "First Lieutenant", "Captain", "Major", "Lieutenant Colonel", "소위", "중위", "대위", "소령", "중령"]
     if any(kw.lower() in rank_name.lower() for kw in junior_keywords):
         is_junior = True
+        
     is_senior = 130 <= rank_num <= 170
     senior_keywords = [
         "Colonel", "Brigadier General", "Major General", "Lieutenant General", "General", 
@@ -499,7 +610,7 @@ def save_verification_log(discord_nick: str, roblox_nick: str):
     log_file = os.path.join(LOG_DIR, "verification_log.txt")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] [{discord_nick}]: [{roblox_nick}]" 
-
+    
     try:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(line + "\n") 
@@ -1257,6 +1368,139 @@ def make_bulk_rank_summary_embed(
 
     embed.set_footer(text="Made By Lunar")
     return embed
+
+@bot.tree.command(name="커뮤니티_작성", description="커뮤니티 양식을 모달로 제출합니다.")
+async def community_create(interaction: discord.Interaction):
+    modal = CommunityFormModal()
+    await interaction.response.send_modal(modal)
+    
+@bot.tree.command(name="커뮤니티_조회", description="제목으로 커뮤니티 글을 조회합니다.")
+@app_commands.describe(
+    title="검색할 제목",
+    page="페이지 (기본 1)"
+)
+async def community_view(
+    interaction: discord.Interaction,
+    title: str,
+    page: int = 1
+):
+    guild = interaction.guild
+    guild_id = guild.id if guild else 0
+    per_page = 5
+    offset = (page - 1) * per_page
+
+    cursor.execute(
+        """
+        SELECT id, author_id, title, content, created_at
+        FROM community_posts
+        WHERE guild_id=? AND title LIKE ?
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (guild_id, f"%{title}%", per_page, offset),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        await interaction.response.send_message("해당 제목의 글이 없습니다.", ephemeral=True)
+        return
+
+    embeds = []
+    for pid, author_id, t, content, created_at in rows:
+        e = discord.Embed(
+            title=f"#{pid} | {t}",
+            description=content[:2000],
+            color=discord.Color.green(),
+        )
+        author = guild.get_member(author_id) if guild else None
+        if author:
+            e.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+        e.set_footer(text=created_at)
+        embeds.append(e)
+
+    await interaction.response.send_message(
+        content=f"검색어: `{title}` (페이지 {page})",
+        embeds=embeds,
+        ephemeral=True,
+    )
+
+@bot.tree.command(name="커뮤니티_삭제", description="커뮤니티 글을 삭제합니다.")
+@app_commands.describe(
+    post_id="삭제할 글 번호",
+    reason="삭제 사유 (선택)"
+)
+async def community_delete(
+    interaction: discord.Interaction,
+    post_id: int,
+    reason: str | None = None,
+):
+    guild = interaction.guild
+    guild_id = guild.id if guild else 0
+    user = interaction.user
+
+    # 글 정보 가져오기
+    cursor.execute(
+        "SELECT title, author_id, content FROM community_posts WHERE guild_id=? AND id=?",
+        (guild_id, post_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        await interaction.response.send_message("해당 번호의 글이 없습니다.", ephemeral=True)
+        return
+
+    title, author_id, content = row
+    is_admin_user = isadmin(user)
+
+    # 권한 체크: 작성자 또는 관리자만 허용
+    if (author_id != user.id) and (not is_admin_user):
+        await interaction.response.send_message(
+            "본인이 작성한 글만 삭제할 수 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    # 삭제
+    cursor.execute(
+        "DELETE FROM community_posts WHERE guild_id=? AND id=?",
+        (guild_id, post_id),
+    )
+    conn.commit()
+
+    # 작성자에게 DM 알림
+    try:
+        author_user = await bot.fetch_user(author_id)
+        if author_user:
+            dm_embed = discord.Embed(
+                title="커뮤니티 글이 삭제되었습니다",
+                description=(
+                    f"서버: **{guild.name if guild else '알 수 없음'}**\n"
+                    f"글 번호: `#{post_id}`\n"
+                    f"제목: **{title}**"
+                ),
+                color=discord.Color.red(),
+            )
+            preview = (content[:200] + "…") if len(content) > 200 else content
+            if preview:
+                dm_embed.add_field(name="내용 미리보기", value=preview, inline=False)
+            if reason:
+                dm_embed.add_field(name="삭제 사유", value=reason, inline=False)
+
+            dm_embed.set_footer(
+                text=f"삭제자: {user} ({user.id})"
+            )
+            await author_user.send(embed=dm_embed)
+    except discord.Forbidden:
+        pass
+    except Exception as e:
+        print(f"community_delete DM error: {e}")
+
+    # 실행자 피드백
+    if is_admin_user and author_id != user.id:
+        msg = f"#{post_id} `{title}` 글을 삭제했습니다. (작성자: <@{author_id}>)"
+    else:
+        msg = f"본인이 작성한 글 #{post_id} `{title}` 을(를) 삭제했습니다."
+
+    await interaction.response.send_message(msg, ephemeral=True)
+
 @bot.tree.command(name="인증", description="로블록스 계정 인증을 시작합니다.")
 @app_commands.describe(로블닉="로블록스 닉네임")
 async def verify(interaction: discord.Interaction, 로블닉: str):
@@ -1709,18 +1953,7 @@ async def version_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"현재 버전 : **v{version}**"
     )
-
-@bot.tree.command(name="ars", description="텍스트를 ARS 음성으로 변환")
-async def ars(interaction: discord.Interaction, *, text: str):
-    # TTS 변환 (속도 느리게 설정하여 ARS 느낌)
-    tts = gTTS(text=text, lang='ko', slow=True)
-    filename = "ars_message.mp3"
-    tts.save(filename)
-
-    # 파일로 전송
-    await interaction.response.send_message(file=discord.File(filename))
-    os.remove(filename)  # 전송 후 삭제
-
+    
 @bot.tree.command(name="패치공지", description="패치 공지 작성")
 async def patch_notice(interaction: discord.Interaction):
 
@@ -1732,7 +1965,7 @@ async def patch_notice(interaction: discord.Interaction):
         return
 
     await interaction.response.send_modal(PatchModal())
-
+    
 @bot.tree.command(name="채팅그래프")
 async def chat_graph(interaction: discord.Interaction):
 
@@ -1745,6 +1978,10 @@ async def chat_graph(interaction: discord.Interaction):
 
     rows = cur.fetchall()
 
+    if not rows:
+        await interaction.response.send_message("데이터 없음")
+        return
+
     rows.reverse()
 
     hours = [r[0].split(" ")[1] for r in rows]
@@ -1752,6 +1989,22 @@ async def chat_graph(interaction: discord.Interaction):
 
     avg = sum(counts) // len(counts)
     peak = max(counts)
+
+    # 📊 그래프 생성
+    plt.figure()
+    plt.plot(hours, counts)
+    plt.xticks(rotation=45)
+    plt.title("Chat Activity (24h)")
+    plt.xlabel("Time")
+    plt.ylabel("Messages")
+
+    # PNG 저장 (메모리)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    plt.close()
+
+    file = discord.File(buf, filename="chat_graph.png")
 
     embed = discord.Embed(
         title="📊 채팅 통계 (최근 24시간)",
@@ -1767,7 +2020,10 @@ async def chat_graph(interaction: discord.Interaction):
             text=f"다음 갱신: {next_update.strftime('%H:%M:%S')}"
         )
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(
+        embed=embed,
+        file=file
+    )
 
 @bot.tree.command(name="공지", description="인증된 모든 유저에게 공지 전송")
 @app_commands.describe(
@@ -1937,18 +2193,16 @@ async def verify_stats(interaction: discord.Interaction):
             lines = [f"{m.display_name} ({m.id})" for m in chunk]
             chunks.append(f"**{title}**\n" + "\n".join(lines))
         return chunks
-        
+       
 @bot.tree.command(name="역할목록", description="서버 역할과 봇 역할을 10개씩 출력합니다.(관리자)")
 async def role_all(interaction: discord.Interaction): 
-
     if not is_admin(interaction.user):
         await interaction.response.send_message("관리자만 사용 가능합니다.", ephemeral=True)
-        return 
-
+        return
     await interaction.response.defer(ephemeral=True)
     roles = interaction.guild.roles[::-1]
-    roles = [r for r in roles if r.name != "@everyone"] 
-
+    roles = [r for r in roles if r.name != "@everyone"]
+    
     if roles:
         chunks = [roles[i:i+10] for i in range(0, len(roles), 10)] 
 
@@ -1961,9 +2215,9 @@ async def role_all(interaction: discord.Interaction):
             desc = ""
             for role in chunk:
                 desc += f"{role.mention} | `{role.id}`\n" 
-
             embed.description = desc
             await interaction.followup.send(embed=embed, ephemeral=True)
+            
     bot_member = interaction.guild.get_member(bot.user.id)
     bot_roles = bot_member.roles[::-1]
     bot_roles = [r for r in bot_roles if r.name != "@everyone"] 
@@ -1985,6 +2239,7 @@ async def role_all(interaction: discord.Interaction):
             await interaction.followup.send(embed=embed, ephemeral=True)
     else:
         await interaction.followup.send("봇은 역할이 없습니다.", ephemeral=True)
+    
 @bot.tree.command(name="관리자지정", description="관리자 역할 추가/제거 (개발자 전용)")
 @app_commands.describe(
     역할="추가할 관리자 역할",
@@ -2160,6 +2415,7 @@ async def list_roles(interaction: discord.Interaction):
                 name = r.get("name", "?")
                 rank = r.get("rank", "?")
                 role_id = r.get("id", "?")
+                
                 embed.add_field(
                     name=name,
                     value=f"rank: `{rank}` / id: `{role_id}`",
@@ -2173,8 +2429,8 @@ async def list_roles(interaction: discord.Interaction):
         await interaction.followup.send(
             f"역할 목록 중 에러 발생: {e}",
             ephemeral=True,
-        ) 
-
+        )
+        
 @bot.tree.command(name="승진", description="Roblox 그룹 랭크를 특정 역할로 변경합니다. (관리자)")
 @app_commands.describe(
     username="Roblox 본닉",
@@ -2515,6 +2771,101 @@ async def bulk_demote_to_role(interaction: discord.Interaction, role_name: str):
         ch = interaction.guild.get_channel(log_ch_id) or await interaction.guild.fetch_channel(log_ch_id)
         if ch:
             await ch.send(embed=summary)
+
+@bot.tree.command(name="페이아웃", description="로블닉으로 1회 그룹 페이아웃(DM 확인 안할시 못함)")
+@app_commands.describe(
+    유저="로블록스 닉네임",
+    금액="지급할 로벅스 양 (정수)"
+)
+async def payout_once(interaction: discord.Interaction, 유저: str, 금액: int):
+    if interaction.guild is None:
+        await interaction.response.send_message("길드에서만 사용 가능합니다.", ephemeral=True)
+        return
+
+    caller_id = interaction.user.id
+    if not (is_owner(interaction.user) or caller_id in PAYOUT_ALLOWED_USER_IDS):
+        await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
+        return
+
+    if 금액 <= 0:
+        await interaction.response.send_message("금액은 1 이상이어야 합니다.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    roblox_username = 유저
+
+    # 🔥 닉 → UserId (네 함수 사용)
+    roblox_user_id = await roblox_get_user_id_by_username(roblox_username)
+
+    if not roblox_user_id:
+        await interaction.followup.send(f"❌ 존재하지 않는 로블록스 유저: {roblox_username}", ephemeral=True)
+        return
+
+    # 🔥 DM 확인
+    recipients = {OWNER_ID} | ADDITIONAL_ADMIN_IDS
+    confirm_text = (
+        f"페이아웃 확인 요청:\n"
+        f"- 실행자: {interaction.user} ({interaction.user.id})\n"
+        f"- 로블닉: {roblox_username}\n"
+        f"- UserId: {roblox_user_id}\n"
+        f"- 지급량: {금액} R$"
+    )
+
+    view = PayoutConfirmView()
+    approved = False
+
+    for admin_id in recipients:
+        try:
+            admin_user = await bot.fetch_user(admin_id)
+            await admin_user.send(content=confirm_text, view=view)
+
+            await view.wait()
+            if view.result:
+                approved = True
+                break
+
+        except Exception:
+            continue
+
+    if not approved:
+        await interaction.followup.send("❌ 페이아웃이 거부되었거나 확인되지 않았습니다.", ephemeral=True)
+        return
+
+    # 🔥 페이아웃 요청
+    try:
+        resp = requests.post(
+            f"{API_BASE}/payout",
+            json={
+                "userId": roblox_username,
+                "amount": 금액
+            },
+            headers=_rank_api_headers(),
+            timeout=30,
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ 서버 요청 오류: {e}", ephemeral=True)
+        return
+
+    if resp.status_code != 200 or not resp.json().get("success"):
+        await interaction.followup.send(
+            f"❌ 페이아웃 실패: {resp.status_code} {resp.text}",
+            ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title="그룹 페이아웃 완료",
+        description=(
+            f"`{roblox_username}` 에게 {금액} R$ 지급 완료\n"
+            f"UserId: `{roblox_user_id}`"
+        ),
+        color=discord.Color.green(),
+    )
+    embed.set_footer(text=f"요청자: {interaction.user} ({interaction.user.id})")
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 @bot.tree.command(name="동기화", description="슬래시 명령어를 동기화합니다.")
 async def sync_commands(interaction: discord.Interaction):
     if not is_admin(interaction.user):
@@ -3163,6 +3514,27 @@ async def shop(interaction: discord.Interaction):
     view = ShopView(guild, items)
     embed = view.make_page_embed()
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+class PayoutConfirmView(View):
+    def __init__(self):
+        super().__init__(timeout=3600)  # 1시간 후 자동 종료
+        self.result = None  # 승인(True) / 거부(False)
+
+    @discord.ui.button(label="✅ 승인", style=discord.ButtonStyle.success)
+    async def approve(self, interaction: discord.Interaction, button: Button):
+        self.result = True
+        for child in self.children:
+            child.disabled = True  # 버튼 비활성화
+        await interaction.response.edit_message(content="✅ 승인 완료", view=self)
+        self.stop()
+
+    @discord.ui.button(label="❌ 거부", style=discord.ButtonStyle.danger)
+    async def reject(self, interaction: discord.Interaction, button: Button):
+        self.result = False
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="❌ 거부 완료", view=self)
+        self.stop()
     
 class DramaticGambleModal(Modal, title="극적 도박"):
 
@@ -3267,15 +3639,31 @@ async def economy_graph(interaction: discord.Interaction):
 
     data = [x[0] for x in cur.fetchall()]
 
+    if not data:
+        await interaction.response.send_message("데이터 없음")
+        return
+
     avg = sum(data) // len(data)
 
+    # 📊 그래프 생성
+    plt.figure()
+    plt.plot(data)
+    plt.title("Top 10 Money")
+    plt.xlabel("Rank")
+    plt.ylabel("Money")
+
+    # PNG로 저장 (메모리)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    plt.close()
+
+    file = discord.File(fp=buf, filename="economy.png")
+
     await interaction.response.send_message(
-        f"""
-    📊 경제 그래프
-    평균 돈
-    {avg}
-    """
-)
+        content=f"📊 평균 돈: {avg}",
+        file=file
+    )
 
 @bot.tree.command(name="극적도박", description="극적인 도박을 합니다")
 async def dramatic_gamble(interaction: discord.Interaction):
@@ -4799,11 +5187,7 @@ async def leaderboard():
         for uid, info in data
     ]
 
-if __name__ == "__main__":
-    import asyncio
-    from hypercorn.asyncio import serve
-    from hypercorn.config import Config
-    
+if __name__ == "__main__":    
     async def run_both():
         config = Config()
         config.bind = [f"0.0.0.0:{int(os.getenv('PORT', 8080))}"]
@@ -4814,8 +5198,3 @@ if __name__ == "__main__":
         )
     
     asyncio.run(run_both())
-
-
-
-
-
